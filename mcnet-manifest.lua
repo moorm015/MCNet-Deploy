@@ -1,6 +1,7 @@
 return {
     name = "MCNet",
-    version = "0.3.0",
+    version = "0.4.0",
+    protocol = 1,
 
     files = {
         {
@@ -11,6 +12,11 @@ return {
         {
             source = "services/communications/packet.lua",
             destination = "services/communications/packet.lua"
+        },
+
+        {
+            source = "services/system/device_config.lua",
+            destination = "services/system/device_config.lua"
         },
 
         {
@@ -26,6 +32,11 @@ return {
         {
             source = "tests/drivers/modem_test.lua",
             destination = "tests/drivers/modem_test.lua"
+        },
+
+        {
+            source = "tests/system/device_config_test.lua",
+            destination = "tests/system/device_config_test.lua"
         }
     }
 }
