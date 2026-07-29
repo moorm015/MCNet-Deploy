@@ -1,6 +1,6 @@
 return {
     name = "MCNet",
-    version = "0.5.0",
+    version = "0.5.1",
     protocol = 1,
 
     files = {

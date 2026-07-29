@@ -71,6 +71,11 @@ local function centreX(text)
     )
 end
 
+local function beginContent(y)
+    resetcolours()
+    term.setCursorPos(2, y)
+end
+
 local function writeAt(x, y, text, colour)
     term.setCursorPos(x, y)
 
@@ -770,10 +775,12 @@ local function configureDevice()
         return
     end
 
-    drawHeader(
+    local contentY = drawHeader(
         "Configure this device",
         current
     )
+
+    beginContent(contentY)
 
     print(
         "Enter the identity for this computer."
@@ -865,9 +872,11 @@ local function configureDevice()
         return
     end
 
-    drawHeader(
+    local contentY =drawHeader(
         "Confirm device configuration"
     )
+
+    beginContent(contentY)
 
     print(
         "Address    : "
@@ -963,10 +972,12 @@ local function showDeviceInformation()
     local device =
         getDevice()
 
-    drawHeader(
+    local contentY = drawHeader(
         "Device information",
         device
     )
+
+    beginContent(contentY)
 
     print(
         "Friendly name : "
@@ -1172,10 +1183,12 @@ local function systemInformation()
     local device =
         getDevice()
 
-    drawHeader(
+    local contentY = drawHeader(
         "System information",
         device
     )
+
+    beginContent(contentY)
 
     local freeSpace =
         fs.getFreeSpace("/")

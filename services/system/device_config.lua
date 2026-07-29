@@ -1,6 +1,6 @@
 --[[
     MCNet Device Configuration
-    Version: 0.1.0
+    Version: 0.5.1
 
     Loads, validates and saves the local MCNet device identity.
 ]]
@@ -65,7 +65,7 @@ function deviceConfig.createDefault()
         owner = "MCNet",
         status = deviceConfig.STATUS.OFFLINE,
         computerID = os.getComputerID(),
-        version = "0.4.0"
+        version = "0.5.1"
     }
 end
 
