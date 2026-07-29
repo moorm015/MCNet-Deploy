@@ -1,5 +1,6 @@
 return {
-    version = "0.1.0",
+    name = "MCNet",
+    version = "0.2.0",
 
     files = {
         {
@@ -8,8 +9,18 @@ return {
         },
 
         {
+            source = "drivers/modem.lua",
+            destination = "drivers/modem.lua"
+        },
+
+        {
             source = "tests/communications/packet_test.lua",
             destination = "tests/communications/packet_test.lua"
+        },
+
+        {
+            source = "tests/drivers/modem_test.lua",
+            destination = "tests/drivers/modem_test.lua"
         }
     }
 }
