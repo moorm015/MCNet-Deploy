@@ -72,7 +72,7 @@ local function centreX(text)
 end
 
 local function beginContent(y)
-    resetcolours()
+    resetColours()
     term.setCursorPos(2, y)
 end
 
