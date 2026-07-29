@@ -1,8 +1,13 @@
 return {
     name = "MCNet",
-    version = "0.2.0",
+    version = "0.3.0",
 
     files = {
+        {
+            source = "installer/install.lua",
+            destination = "mcnet.lua"
+        },
+
         {
             source = "services/communications/packet.lua",
             destination = "services/communications/packet.lua"
