@@ -1,28 +1,55 @@
 return {
     name = "MCNet",
-    version = "0.5.1",
-    protocol = 1,
+    version = "0.6.0",
 
     files = {
+
+        -- Main Console
+
         {
-            source = "installer/install.lua",
+            source = "mcnet.lua",
             destination = "mcnet.lua"
         },
 
+        -- Drivers
+
         {
-            source = "services/communications/packet.lua",
-            destination = "services/communications/packet.lua"
+            source = "drivers/modem.lua",
+            destination = "drivers/modem.lua"
         },
+
+        -- System Services
 
         {
             source = "services/system/device_config.lua",
             destination = "services/system/device_config.lua"
         },
 
+        -- UI Services
+
         {
-            source = "drivers/modem.lua",
-            destination = "drivers/modem.lua"
+            source = "services/ui/theme.lua",
+            destination = "services/ui/theme.lua"
         },
+
+        {
+            source = "services/ui/ui.lua",
+            destination = "services/ui/ui.lua"
+        },
+
+        {
+            source = "services/ui/menu.lua",
+            destination = "services/ui/menu.lua"
+        },
+
+        -- Communications
+
+        {
+            source = "services/communications/packet.lua",
+            destination = "services/communications/packet.lua"
+        },
+
+        -- Tests
 
         {
             source = "tests/communications/packet_test.lua",

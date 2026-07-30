@@ -1,14 +1,15 @@
 --[[
     MCNet Console
-    Version: 0.5.1
+    Version: 0.6.0
 
     Installation, device configuration and diagnostic console.
 ]]
 
-local CONSOLE_VERSION = "0.5.1"
+local CONSOLE_VERSION = "0.6.0"
 local PROTOCOL_VERSION = 1
-s
-local BASE_URL = "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
+
+local BASE_URL =
+    "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
 
 local MANIFEST_REMOTE = "mcnet-manifest.lua"
 local MANIFEST_LOCAL = ".mcnet-manifest.lua"
@@ -19,390 +20,46 @@ local DEVICE_CONFIG_MODULE =
 local DEVICE_CONFIG_PATH =
     ".mcnet/device.lua"
 
-local screenWidth, screenHeight = term.getSize()
-local compactMode = screenWidth < 40
+local theme = dofile("services/ui/theme.lua")
+local ui = dofile("services/ui/ui.lua")
+local menu = dofile("services/ui/menu.lua")
 
-local supportsColour = false
+local THEME = theme
 
-if term.isColor then
-    supportsColour = term.isColor()
-elseif term.isColour then
-    supportsColour = term.isColour()
-end
+local screenWidth, screenHeight = ui.getSize()
+local compactMode = ui.isCompact()
+local supportsColour = ui.supportsColour()
 
-local THEME = {
-    background = colors.black,
-    foreground = colors.white,
-    muted = colors.lightGray,
-    title = colors.lime,
-    accent = colors.green,
-    highlight = colors.yellow,
-    error = colors.red,
-    success = colors.lime
-}
-
-local function setTextColour(colour)
-    if supportsColour then
-        term.setTextColor(colour)
-    end
-end
-
-local function setBackgroundColour(colour)
-    if supportsColour then
-        term.setBackgroundColor(colour)
-    end
-end
-
-local function resetColours()
-    setBackgroundColour(colors.black)
-    setTextColour(colors.white)
-end
-
-local function clear()
-    resetColours()
-    term.clear()
-    term.setCursorPos(1, 1)
-end
-
-local function centreX(text)
-    return math.max(
-        1,
-        math.floor((screenWidth - #text) / 2) + 1
-    )
-end
-
-local function beginContent(y)
-    resetColours()
-    term.setCursorPos(2, y)
-end
-
-local function writeAt(x, y, text, colour)
-    term.setCursorPos(x, y)
-
-    if colour then
-        setTextColour(colour)
-    end
-
-    write(text)
-end
-
-local function centreAt(y, text, colour)
-    writeAt(centreX(text), y, text, colour)
-end
-
-local creeperLogo = {
-    "  ########  ",
-    " ########## ",
-    " ########## ",
-    " ##  ##  ## ",
-    " ##  ##  ## ",
-    " ########## ",
-    " ####  #### ",
-    " ###    ### ",
-    " ### ## ### "
-}
-
-local function drawCreeper(startY)
-    for index, line in ipairs(creeperLogo) do
-        centreAt(
-            startY + index - 1,
-            line,
-            THEME.accent
-        )
-    end
-end
-
-local function drawProgressBar(y, progress, label)
-    local maximumBarWidth = 34
-    local barWidth = math.min(
-        maximumBarWidth,
-        screenWidth - 8
-    )
-
-    if barWidth < 10 then
-        barWidth = 10
-    end
-
-    progress = math.max(0, math.min(1, progress))
-
-    local filled =
-        math.floor(barWidth * progress)
-
-    local empty =
-        barWidth - filled
-
-    local bar =
-        "["
-        .. string.rep("=", filled)
-        .. string.rep(" ", empty)
-        .. "]"
-
-    local percentage =
-        tostring(math.floor(progress * 100)) .. "%"
-
-    centreAt(y, bar, THEME.accent)
-    centreAt(y + 1, percentage, THEME.foreground)
-
-    if label then
-        centreAt(y + 3, label, THEME.muted)
-    end
-end
-
-local function transition(label, duration)
-    duration = duration or 0.45
-
-    clear()
-
-    centreAt(1, "MCNet", THEME.title)
-    centreAt(2, "Network Systems Console", THEME.muted)
-
-    drawCreeper(4)
-
-    local barY = math.min(screenHeight - 4, 14)
-    local steps = 24
-
-    for step = 0, steps do
-        local progress = step / steps
-
-        drawProgressBar(
-            barY,
-            progress,
-            label or "Loading..."
-        )
-
-        local delay = duration / steps
-
-        -- Small pauses make the bar feel as though it is buffering.
-        if step == 7 or step == 16 then
-            delay = delay * 2.8
-        elseif step == 12 then
-            delay = delay * 1.8
-        end
-
-        sleep(delay)
-    end
-end
+local setTextColour = ui.setTextColour
+local setBackgroundColour = ui.setBackgroundColour
+local resetColours = ui.resetColours
+local clear = ui.clear
+local centreAt = ui.centreAt
+local drawProgressBar = ui.drawProgressBar
+local transition = ui.transition
+local pause = ui.pause
+local askYesNo = ui.askYesNo
+local readDefault = ui.readDefault
 
 local function drawHeader(pageTitle, device)
-    clear()
-
-    local titleText =
-        compactMode
-        and "MCNet"
-        or "MCNet Console"
-
-    centreAt(1, titleText, THEME.title)
-
-    centreAt(
-        2,
-        string.rep("=", #titleText),
-        THEME.accent
-    )
-
-    writeAt(
-        2,
-        4,
+    screenWidth, screenHeight = ui.getSize()
+    compactMode = ui.isCompact()
+    return ui.drawHeader(
         pageTitle,
-        THEME.foreground
+        device,
+        CONSOLE_VERSION
     )
-
-    local versionText =
-        "v" .. CONSOLE_VERSION
-
-    writeAt(
-        screenWidth - #versionText + 1,
-        1,
-        versionText,
-        THEME.muted
-    )
-
-    if device then
-        local address =
-            device.address or "UNKNOWN"
-
-        local name =
-            device.name or "Unconfigured Device"
-
-        if compactMode then
-            writeAt(
-                2,
-                6,
-                "Device: " .. name,
-                THEME.muted
-            )
-
-            writeAt(
-                2,
-                7,
-                "Addr: " .. address,
-                address == "UNKNOWN"
-                    and THEME.highlight
-                    or THEME.success
-            )
-        else
-            writeAt(
-                2,
-                6,
-                "Device : " .. name,
-                THEME.muted
-            )
-
-            writeAt(
-                2,
-                7,
-                "Address: " .. address,
-                address == "UNKNOWN"
-                    and THEME.highlight
-                    or THEME.success
-            )
-        end
-
-        return 9
-    end
-
-    return 6
-end
-
-local function pause(message)
-    resetColours()
-    print("")
-    write(message or "Press Enter to continue...")
-    read()
-end
-
-local function askYesNo(question)
-    while true do
-        write(question .. " (Y/N): ")
-
-        local answer =
-            string.lower(read())
-
-        if answer == "y"
-            or answer == "yes" then
-            return true
-        end
-
-        if answer == "n"
-            or answer == "no" then
-            return false
-        end
-
-        setTextColour(THEME.error)
-        print("Please enter Y or N.")
-        setTextColour(THEME.foreground)
-    end
-end
-
-local function readDefault(prompt, default)
-    write(prompt)
-
-    if default and default ~= "" then
-        setTextColour(THEME.muted)
-        write(" [" .. tostring(default) .. "]")
-        setTextColour(THEME.foreground)
-    end
-
-    write(": ")
-
-    local value = read()
-
-    if value == "" then
-        return default
-    end
-
-    return value
 end
 
 local function chooseMenu(title, options, device)
-    local selected = 1
-
-    while true do
-        local startY =
-            drawHeader(title, device)
-
-        for index, option in ipairs(options) do
-            local y =
-                startY + index - 1
-
-            if index == selected then
-                setBackgroundColour(THEME.accent)
-                setTextColour(colors.black)
-
-                writeAt(
-                    3,
-                    y,
-                    " " .. option.label .. " "
-                )
-
-                resetColours()
-            else
-                writeAt(
-                    3,
-                    y,
-                    "  " .. option.label,
-                    THEME.foreground
-                )
-            end
-        end
-
-        local instructionY =
-            math.min(
-                screenHeight,
-                startY + #options + 2
-            )
-
-        writeAt(
-            3,
-            instructionY,
-            compactMode
-                and "Arrows + Enter"
-                or "Up/Down: select   Enter: open",
-            THEME.muted
-        )
-
-        local event = {
-            os.pullEvent()
-        }
-
-        if event[1] == "key" then
-            local key = event[2]
-
-            if key == keys.up then
-                selected = selected - 1
-
-                if selected < 1 then
-                    selected = #options
-                end
-            elseif key == keys.down then
-                selected = selected + 1
-
-                if selected > #options then
-                    selected = 1
-                end
-            elseif key == keys.enter then
-                return options[selected]
-            end
-        elseif event[1] == "char" then
-            local number =
-                tonumber(event[2])
-
-            if number
-                and number >= 1
-                and number <= #options then
-                return options[number]
-            end
-        elseif event[1] == "mouse_click" then
-            local mouseY = event[4]
-            local clickedIndex =
-                mouseY - startY + 1
-
-            if clickedIndex >= 1
-                and clickedIndex <= #options then
-                selected = clickedIndex
-                return options[selected]
-            end
-        end
-    end
+    screenWidth, screenHeight = ui.getSize()
+    compactMode = ui.isCompact()
+    return menu.choose(
+        title,
+        options,
+        device,
+        CONSOLE_VERSION
+    )
 end
 
 local function downloadFile(
