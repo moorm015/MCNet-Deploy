@@ -1,13 +1,13 @@
 --[[
     MCNet Console
-    Version: 0.5.0
+    Version: 0.5.1
 
     Installation, device configuration and diagnostic console.
 ]]
 
-local CONSOLE_VERSION = "0.5.0"
+local CONSOLE_VERSION = "0.5.1"
 local PROTOCOL_VERSION = 1
-
+s
 local BASE_URL =
     "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
 
@@ -21,6 +21,7 @@ local DEVICE_CONFIG_PATH =
     ".mcnet/device.lua"
 
 local screenWidth, screenHeight = term.getSize()
+local compactMode = screenWidth < 40
 
 local supportsColour = false
 
@@ -186,12 +187,16 @@ end
 local function drawHeader(pageTitle, device)
     clear()
 
-    setTextColour(THEME.title)
-    centreAt(1, "MCNet Console", THEME.title)
+    local titleText =
+        compactMode
+        and "MCNet"
+        or "MCNet Console"
+
+    centreAt(1, titleText, THEME.title)
 
     centreAt(
         2,
-        string.rep("=", 13),
+        string.rep("=", #titleText),
         THEME.accent
     )
 
@@ -206,7 +211,7 @@ local function drawHeader(pageTitle, device)
         "v" .. CONSOLE_VERSION
 
     writeAt(
-        screenWidth - #versionText,
+        screenWidth - #versionText + 1,
         1,
         versionText,
         THEME.muted
@@ -219,21 +224,39 @@ local function drawHeader(pageTitle, device)
         local name =
             device.name or "Unconfigured Device"
 
-        writeAt(
-            2,
-            6,
-            "Device : " .. name,
-            THEME.muted
-        )
+        if compactMode then
+            writeAt(
+                2,
+                6,
+                "Device: " .. name,
+                THEME.muted
+            )
 
-        writeAt(
-            2,
-            7,
-            "Address: " .. address,
-            address == "UNKNOWN"
-                and THEME.highlight
-                or THEME.success
-        )
+            writeAt(
+                2,
+                7,
+                "Addr: " .. address,
+                address == "UNKNOWN"
+                    and THEME.highlight
+                    or THEME.success
+            )
+        else
+            writeAt(
+                2,
+                6,
+                "Device : " .. name,
+                THEME.muted
+            )
+
+            writeAt(
+                2,
+                7,
+                "Address: " .. address,
+                address == "UNKNOWN"
+                    and THEME.highlight
+                    or THEME.success
+            )
+        end
 
         return 9
     end
@@ -332,7 +355,9 @@ local function chooseMenu(title, options, device)
         writeAt(
             3,
             instructionY,
-            "Up/Down: select   Enter: open",
+            compactMode
+                and "Arrows + Enter"
+                or "Up/Down: select   Enter: open",
             THEME.muted
         )
 
@@ -366,6 +391,16 @@ local function chooseMenu(title, options, device)
                 and number >= 1
                 and number <= #options then
                 return options[number]
+            end
+        elseif event[1] == "mouse_click" then
+            local mouseY = event[4]
+            local clickedIndex =
+                mouseY - startY + 1
+
+            if clickedIndex >= 1
+                and clickedIndex <= #options then
+                selected = clickedIndex
+                return options[selected]
             end
         end
     end
@@ -775,12 +810,10 @@ local function configureDevice()
         return
     end
 
-    local contentY = drawHeader(
+    drawHeader(
         "Configure this device",
         current
     )
-
-    beginContent(contentY)
 
     print(
         "Enter the identity for this computer."
@@ -872,11 +905,9 @@ local function configureDevice()
         return
     end
 
-    local contentY =drawHeader(
+    drawHeader(
         "Confirm device configuration"
     )
-
-    beginContent(contentY)
 
     print(
         "Address    : "
@@ -972,12 +1003,10 @@ local function showDeviceInformation()
     local device =
         getDevice()
 
-    local contentY = drawHeader(
+    drawHeader(
         "Device information",
         device
     )
-
-    beginContent(contentY)
 
     print(
         "Friendly name : "
@@ -1183,12 +1212,10 @@ local function systemInformation()
     local device =
         getDevice()
 
-    local contentY = drawHeader(
+    drawHeader(
         "System information",
         device
     )
-
-    beginContent(contentY)
 
     local freeSpace =
         fs.getFreeSpace("/")
@@ -1262,7 +1289,9 @@ local function main()
         local options = {
             {
                 label =
-                    "Install or update MCNet",
+                    compactMode
+                    and "Install / update"
+                    or "Install or update MCNet",
                 action = function()
                     local success, result =
                         installMCNet()
@@ -1275,25 +1304,33 @@ local function main()
             },
             {
                 label =
-                    "Configure this device",
+                    compactMode
+                    and "Configure device"
+                    or "Configure this device",
                 action =
                     configureDevice
             },
             {
                 label =
-                    "View device information",
+                    compactMode
+                    and "View device"
+                    or "View device information",
                 action =
                     showDeviceInformation
             },
             {
                 label =
-                    "Diagnostics and tests",
+                    compactMode
+                    and "Diagnostics"
+                    or "Diagnostics and tests",
                 action =
                     testMenu
             },
             {
                 label =
-                    "System information",
+                    compactMode
+                    and "System info"
+                    or "System information",
                 action =
                     systemInformation
             },
