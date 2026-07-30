@@ -8,8 +8,7 @@
 local CONSOLE_VERSION = "0.5.1"
 local PROTOCOL_VERSION = 1
 s
-local BASE_URL =
-    "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
+local BASE_URL = "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
 
 local MANIFEST_REMOTE = "mcnet-manifest.lua"
 local MANIFEST_LOCAL = ".mcnet-manifest.lua"
