@@ -126,6 +126,7 @@ local logos = {
 
 local order = { "creeper", "skeleton", "zombie", "spider", "enderman", "blaze" }
 local module = {}
+local currentRandomLogo = nil
 
 function module.choose(name, compact)
     if name == "off" then
@@ -133,7 +134,13 @@ function module.choose(name, compact)
     end
 
     if name == "random" or not logos[name] then
-        name = order[math.random(1, #order)]
+        if not currentRandomLogo then
+            currentRandomLogo = order[math.random(1, #order)]
+        end
+
+        name = currentRandomLogo
+    else
+        currentRandomLogo = nil
     end
 
     local logo = logos[name]
@@ -142,6 +149,10 @@ function module.choose(name, compact)
         label = logo.label,
         lines = compact and logo.compact or logo.full
     }
+end
+
+function module.newScreen()
+    currentRandomLogo = nil
 end
 
 function module.getNames()

@@ -104,7 +104,7 @@ function application.run(context)
         sleep(0.3)
 
         ui.restoreNative()
-        local completed = shell.run(INSTALLER_LOCAL)
+        local completed = os.run(getfenv(),INSTALLER_LOCAL)
 
         if completed then
             if fs.exists(INSTALLER_LOCAL) then
@@ -145,6 +145,7 @@ function application.run(context)
     end
 
     local function configureDevice()
+        ui.restoreNative()
         local current = getDevice()
         local selectedType = chooseValue("Select device type", deviceModule.getTypes(false), current.type)
         if not selectedType then
@@ -221,6 +222,7 @@ function application.run(context)
         print("")
         print(proposed.address .. " is now online.")
         ui.pause()
+        ui.configure(settings)
     end
 
     local function deviceInformation()
@@ -407,6 +409,14 @@ function application.run(context)
     }
 
     local function runTest(test)
+        if not test then
+            ui.drawHeader("Test error", getDevice(), VERSION)
+            print("")
+            print("No test was selected.")
+            ui.pause()
+            return
+        end
+
         ui.restoreNative()
         term.clear()
         term.setCursorPos(1, 1)
@@ -422,7 +432,11 @@ function application.run(context)
             return
         end
 
-        shell.run(test.path)
+        local completed = os.run(getfenv(), test.path)
+        if not completed then
+            print("")
+            print("The test program returned an error.")
+        end
         ui.pause()
         ui.configure(settings)
     end

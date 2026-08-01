@@ -233,6 +233,7 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
     end
 
     function ui.drawHeader(pageTitle, device, version)
+        ui.resetLogo()
         ui.clear()
         local layout = ui.getLayout()
         ui.drawFrame()
@@ -358,9 +359,24 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
         ui.resetColours()
     end
 
+    local currentLogo = nil
+
+    function ui.resetLogo()
+        currentLogo = nil
+    
+        if logoLibrary.newScreen then
+            logoLibrary.newScreen()
+        end
+    end
+
     function ui.drawLogo(name, startY)
         local layout = ui.getLayout()
-        local selected = logoLibrary.choose(name or "random", layout.compact)
+
+        if not currentLogo then
+            currentLogo = logoLibrary.choose(name or "random", layout.compact)
+        end
+
+        local selected = currentLogo
 
         if not selected then
             return 0, nil
@@ -419,6 +435,7 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
     end
 
     function ui.readDefault(prompt, default)
+        ui.resetColours()
         write(prompt)
 
         if default ~= nil and tostring(default) ~= "" then
@@ -428,8 +445,17 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
         end
 
         write(": ")
+
+        if term.setCursorBlink then
+            term.setCursorBlink(true)
+        end
+
         local value = read()
 
+        if term.setCursorBlink then
+            term.setCursorBlink(false)
+        end
+        
         if value == "" then
             return default
         end
