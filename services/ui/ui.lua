@@ -363,10 +363,6 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
 
     function ui.resetLogo()
         currentLogo = nil
-    
-        if logoLibrary.newScreen then
-            logoLibrary.newScreen()
-        end
     end
 
     function ui.drawLogo(name, startY)
