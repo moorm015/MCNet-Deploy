@@ -104,7 +104,12 @@ function application.run(context)
         sleep(0.3)
 
         ui.restoreNative()
-        local completed = os.run(getfenv(),INSTALLER_LOCAL)
+
+        local completed =
+            os.run(
+                getfenv(),
+                INSTALLER_LOCAL
+            )
 
         if completed then
             if fs.exists(INSTALLER_LOCAL) then
@@ -146,6 +151,7 @@ function application.run(context)
 
     local function configureDevice()
         ui.restoreNative()
+
         local current = getDevice()
         local selectedType = chooseValue("Select device type", deviceModule.getTypes(false), current.type)
         if not selectedType then
@@ -217,6 +223,14 @@ function application.run(context)
 
         if os.setComputerLabel then
             os.setComputerLabel(proposed.systemName)
+        end
+
+        if context.network then
+            context.network.setDevice(proposed)
+        end
+
+        if context.messaging then
+            context.messaging.setDevice(proposed)
         end
 
         print("")
@@ -405,12 +419,42 @@ function application.run(context)
             label = "Responsive layout tests",
             compactLabel = "Layout tests",
             path = "tests/ui/layout_test.lua"
+        },
+        {
+            label = "Network frame tests",
+            compactLabel = "Frame tests",
+            path = "tests/communications/frame_test.lua"
+        },
+        {
+            label = "Routing database tests",
+            compactLabel = "Routing tests",
+            path = "tests/communications/routing_test.lua"
+        },
+        {
+            label = "Messaging store tests",
+            compactLabel = "Messaging tests",
+            path = "tests/communications/messaging_test.lua"
+        },
+        {
+            label = "Network service tests",
+            compactLabel = "Network tests",
+            path = "tests/communications/network_test.lua"
+        },
+        {
+            label = "End-to-end mesh tests",
+            compactLabel = "Mesh tests",
+            path = "tests/communications/mesh_test.lua"
         }
     }
 
     local function runTest(test)
         if not test then
-            ui.drawHeader("Test error", getDevice(), VERSION)
+            ui.drawHeader(
+                "Test error",
+                getDevice(),
+                VERSION
+            )
+
             print("")
             print("No test was selected.")
             ui.pause()
@@ -420,6 +464,7 @@ function application.run(context)
         ui.restoreNative()
         term.clear()
         term.setCursorPos(1, 1)
+
         print(test.label)
         print(string.rep("=", #test.label))
         print("")
@@ -432,11 +477,17 @@ function application.run(context)
             return
         end
 
-        local completed = os.run(getfenv(), test.path)
+        local completed =
+            os.run(
+                getfenv(),
+                test.path
+            )
+
         if not completed then
             print("")
             print("The test program returned an error.")
         end
+
         ui.pause()
         ui.configure(settings)
     end
@@ -486,7 +537,7 @@ function application.run(context)
                 {
                     label = "Run built-in diagnostics",
                     compactLabel = "Built-in checks",
-                    description = "Check storage, internet, core files, identity, modem and display.",
+                    description = "Check storage, internet, core files, identity, modem, display and MCNet network.",
                     action = builtInDiagnostics
                 }
             }
@@ -537,17 +588,406 @@ function application.run(context)
         ui.pause()
     end
 
-    local function networkPage()
+    local function showNetworkStatus()
         local device = getDevice()
-        local start = ui.drawHeader("Network", device, VERSION)
-        local palette = ui.getPalette()
-        local layout = ui.getLayout()
+        local status = context.network.getStatus()
+        local start = ui.drawHeader("Network status", device, VERSION)
 
-        ui.writeAt(layout.left, start, "Messaging layer: NEXT MILESTONE", palette.warning)
-        ui.writeAt(layout.left, start + 2, "Modems detected: " .. tostring(context.diagnostics.countModems()), palette.foreground)
-        ui.writeAt(layout.left, start + 4, "Tomorrow:", palette.title)
-        ui.writeAt(layout.left, start + 5, "Send and receive MCNet packets.", palette.muted)
+        ui.printField("Role", status.role, start)
+        ui.printField("Channel", status.channel, start + 1)
+        ui.printField(
+            "Modem",
+            status.modemReady and "READY" or "UNAVAILABLE",
+            start + 2,
+            status.modemReady
+                and ui.getPalette().success
+                or ui.getPalette().warning
+        )
+
+        ui.printField(
+            "Tower",
+            status.selectedTower or "NONE",
+            start + 3
+        )
+
+        ui.printField(
+            "Nearby towers",
+            status.nearbyTowers,
+            start + 4
+        )
+
+        ui.printField(
+            "Neighbours",
+            status.neighbours,
+            start + 5
+        )
+
+        ui.printField(
+            "Local endpoints",
+            status.localEndpoints,
+            start + 6
+        )
+
+        ui.printField(
+            "Known destinations",
+            status.knownDestinations,
+            start + 7
+        )
+
+        ui.printField(
+            "Pending packets",
+            status.pending,
+            start + 8
+        )
+
         ui.pause()
+    end
+
+    local function showNearbyTowers()
+        local towers =
+            context.network.getNearbyTowers()
+
+        local options = {}
+
+        for _, tower in ipairs(towers) do
+            local item = tower
+
+            table.insert(options, {
+                label =
+                    item.address
+                    .. "  "
+                    .. tostring(item.distance or 0)
+                    .. " blocks",
+                compactLabel = item.address,
+                description =
+                    item.friendlyName
+                    or item.systemName
+                    or "Tower beacon",
+                action = function()
+                    local start =
+                        ui.drawHeader(
+                            "Nearby tower",
+                            getDevice(),
+                            VERSION
+                        )
+
+                    ui.printField(
+                        "Address",
+                        item.address,
+                        start
+                    )
+
+                    ui.printField(
+                        "Distance",
+                        tostring(item.distance or 0)
+                            .. " blocks",
+                        start + 1
+                    )
+
+                    ui.printField(
+                        "Region",
+                        item.region or "UNKNOWN",
+                        start + 2
+                    )
+
+                    ui.printField(
+                        "Name",
+                        item.friendlyName
+                            or item.systemName
+                            or "None",
+                        start + 3
+                    )
+
+                    ui.pause()
+                end
+            })
+        end
+
+        table.insert(options, {
+            label =
+                #towers == 0
+                and "No towers detected"
+                or "Return",
+            compactLabel =
+                #towers == 0
+                and "No towers"
+                or "Back",
+            disabled = #towers == 0,
+            back = #towers > 0
+        })
+
+        if #towers == 0 then
+            table.insert(options, {
+                label = "Return",
+                compactLabel = "Back",
+                back = true
+            })
+        end
+
+        while true do
+            local selected =
+                menu.choose(
+                    ui,
+                    "Nearby towers",
+                    options,
+                    getDevice(),
+                    VERSION
+                )
+
+            if selected.back then
+                return
+            end
+
+            if selected.action then
+                selected.action()
+            end
+        end
+    end
+
+    local function showNetworkList(
+        title,
+        values,
+        labelFunction,
+        detailFunction
+    )
+        local options = {}
+
+        for _, value in ipairs(values) do
+            local item = value
+
+            table.insert(options, {
+                label = labelFunction(item),
+                compactLabel =
+                    item.address
+                    or item.destination
+                    or item.origin
+                    or "Entry",
+                description = detailFunction(item),
+                action = function()
+                    local start =
+                        ui.drawHeader(
+                            title,
+                            getDevice(),
+                            VERSION
+                        )
+
+                    ui.writeAt(
+                        ui.getLayout().left,
+                        start,
+                        detailFunction(item),
+                        ui.getPalette().foreground
+                    )
+
+                    ui.pause()
+                end
+            })
+        end
+
+        if #values == 0 then
+            table.insert(options, {
+                label = "No entries are currently known",
+                compactLabel = "No entries",
+                disabled = true
+            })
+        end
+
+        table.insert(options, {
+            label = "Return",
+            compactLabel = "Back",
+            back = true
+        })
+
+        while true do
+            local selected =
+                menu.choose(
+                    ui,
+                    title,
+                    options,
+                    getDevice(),
+                    VERSION
+                )
+
+            if selected.back then
+                return
+            end
+
+            if selected.action then
+                selected.action()
+            end
+        end
+    end
+
+    local function showNeighbours()
+        showNetworkList(
+            "Tower neighbours",
+            context.network.getNeighbours(),
+            function(item)
+                return item.address
+                    .. "  "
+                    .. tostring(item.distance or 0)
+                    .. " blocks"
+            end,
+            function(item)
+                return item.address
+                    .. " | "
+                    .. tostring(item.region or "UNKNOWN")
+                    .. " | "
+                    .. tostring(item.distance or 0)
+                    .. " blocks"
+            end
+        )
+    end
+
+    local function showEndpoints()
+        showNetworkList(
+            "Registered endpoints",
+            context.network.getLocalEndpoints(),
+            function(item)
+                return item.address
+                    .. "  "
+                    .. tostring(item.type or "ENDPOINT")
+            end,
+            function(item)
+                return item.address
+                    .. " | "
+                    .. tostring(item.type or "ENDPOINT")
+                    .. " | "
+                    .. tostring(item.distance or 0)
+                    .. " blocks"
+            end
+        )
+    end
+
+    local function showDestinations()
+        showNetworkList(
+            "Known destinations",
+            context.network.getKnownDestinations(),
+            function(item)
+                return item.destination
+                    .. " via "
+                    .. tostring(item.owner or "UNKNOWN")
+            end,
+            function(item)
+                return tostring(item.kind or "DESTINATION")
+                    .. " "
+                    .. item.destination
+                    .. " is attached to "
+                    .. tostring(item.owner or "UNKNOWN")
+            end
+        )
+    end
+
+    local function showMessageStore()
+        local summary =
+            context.messaging.getSummary()
+
+        local start =
+            ui.drawHeader(
+                "Message storage",
+                getDevice(),
+                VERSION
+            )
+
+        ui.printField(
+            "Inbox",
+            summary.inbox,
+            start
+        )
+
+        ui.printField(
+            "Unread",
+            summary.unread,
+            start + 1
+        )
+
+        ui.printField(
+            "Outbox",
+            summary.outbox,
+            start + 2
+        )
+
+        ui.printField(
+            "File",
+            context.messaging.getPath(),
+            start + 3
+        )
+
+        ui.pause()
+    end
+
+    local function networkPage()
+        while true do
+            local status =
+                context.network.getStatus()
+
+            local options = {
+                {
+                    label = "Network status",
+                    compactLabel = "Status",
+                    description =
+                        "Show modem, tower, routing and queue state.",
+                    action = showNetworkStatus
+                },
+                {
+                    label = "Nearby tower beacons",
+                    compactLabel = "Nearby towers",
+                    description =
+                        "Show towers directly visible to this endpoint.",
+                    disabled = status.role == "ROUTER",
+                    action = showNearbyTowers
+                },
+                {
+                    label = "Direct tower neighbours",
+                    compactLabel = "Neighbours",
+                    description =
+                        "Show towers directly connected by wireless range.",
+                    disabled = status.role ~= "ROUTER",
+                    action = showNeighbours
+                },
+                {
+                    label = "Registered local endpoints",
+                    compactLabel = "Endpoints",
+                    description =
+                        "Show PDAs and other devices attached to this tower.",
+                    disabled = status.role ~= "ROUTER",
+                    action = showEndpoints
+                },
+                {
+                    label = "Known routed destinations",
+                    compactLabel = "Destinations",
+                    description =
+                        "Show destinations learned from tower link-state data.",
+                    action = showDestinations
+                },
+                {
+                    label = "Message storage",
+                    compactLabel = "Messages",
+                    description =
+                        "Show inbox, unread and outbox counts.",
+                    action = showMessageStore
+                },
+                {
+                    label = "Return to main menu",
+                    compactLabel = "Back",
+                    back = true
+                }
+            }
+
+            local selected =
+                menu.choose(
+                    ui,
+                    "Network console",
+                    options,
+                    getDevice(),
+                    VERSION
+                )
+
+            if selected.back then
+                return
+            end
+
+            selected.action()
+        end
     end
 
     local function launchRoleApplication()
@@ -605,7 +1045,7 @@ function application.run(context)
             {
                 label = "Network console",
                 compactLabel = "Network",
-                description = "Messaging and routing tools will be connected here next.",
+                description = "Inspect tower selection, routes, endpoints, queues and message storage.",
                 action = networkPage
             },
             {

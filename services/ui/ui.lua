@@ -369,7 +369,11 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
         local layout = ui.getLayout()
 
         if not currentLogo then
-            currentLogo = logoLibrary.choose(name or "random", layout.compact)
+            currentLogo =
+                logoLibrary.choose(
+                    name or "random",
+                    layout.compact
+                )
         end
 
         local selected = currentLogo
@@ -385,13 +389,25 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
             if row > layout.contentBottom - 3 then
                 break
             end
-            ui.centreAt(row, line, palette.accent)
+
+            ui.centreAt(
+                row,
+                line,
+                palette.accent
+            )
+
             row = row + 1
             drawn = drawn + 1
         end
 
-        if drawn > 0 and row <= layout.contentBottom - 2 then
-            ui.centreAt(row, selected.label, palette.muted)
+        if drawn > 0
+            and row <= layout.contentBottom - 2 then
+            ui.centreAt(
+                row,
+                selected.label,
+                palette.muted
+            )
+
             drawn = drawn + 1
         end
 
@@ -441,9 +457,12 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
         end
 
         if layout.compact then
-            -- PDA and other narrow displays use separate lines so the
-            -- typing cursor always remains visible.
-            print(ui.clip(tostring(prompt), layout.usableWidth))
+            print(
+                ui.clip(
+                    tostring(prompt),
+                    layout.usableWidth
+                )
+            )
 
             if defaultText ~= "" then
                 setText(palette.muted)
@@ -458,12 +477,15 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
 
             write("> ")
         else
-            -- Full-size computers and monitors retain the inline form.
             write(tostring(prompt))
 
             if defaultText ~= "" then
                 setText(palette.muted)
-                write(" [" .. defaultText .. "]")
+                write(
+                    " ["
+                    .. defaultText
+                    .. "]"
+                )
                 ui.resetColours()
             end
 
