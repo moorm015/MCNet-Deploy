@@ -3,6 +3,10 @@
 local module = {}
 
 function module.new(ui, version, totalSteps, heading)
+    -- Choose one fresh logo when this loading screen is created.
+    -- All redraws belonging to this loading screen then reuse it.
+    ui.resetLogo()
+    
     local loading = {}
     local current = 0
     totalSteps = math.max(1, tonumber(totalSteps) or 1)

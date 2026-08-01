@@ -436,15 +436,43 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
 
     function ui.readDefault(prompt, default)
         ui.resetColours()
-        write(prompt)
 
-        if default ~= nil and tostring(default) ~= "" then
-            setText(palette.muted)
-            write(" [" .. tostring(default) .. "]")
-            ui.resetColours()
+        local layout = ui.getLayout()
+        local defaultText = ""
+
+        if default ~= nil then
+            defaultText = tostring(default)
         end
 
-        write(": ")
+        if layout.compact then
+            -- PDA and other narrow displays use separate lines so the
+            -- typing cursor always remains visible.
+            print(ui.clip(tostring(prompt), layout.usableWidth))
+
+            if defaultText ~= "" then
+                setText(palette.muted)
+                print(
+                    ui.clip(
+                        "Current: " .. defaultText,
+                        layout.usableWidth
+                    )
+                )
+                ui.resetColours()
+            end
+
+            write("> ")
+        else
+            -- Full-size computers and monitors retain the inline form.
+            write(tostring(prompt))
+
+            if defaultText ~= "" then
+                setText(palette.muted)
+                write(" [" .. defaultText .. "]")
+                ui.resetColours()
+            end
+
+            write(": ")
+        end
 
         if term.setCursorBlink then
             term.setCursorBlink(true)
@@ -455,7 +483,7 @@ function module.new(themeLibrary, layoutLibrary, logoLibrary)
         if term.setCursorBlink then
             term.setCursorBlink(false)
         end
-        
+
         if value == "" then
             return default
         end
