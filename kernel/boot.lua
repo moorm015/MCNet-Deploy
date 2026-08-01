@@ -50,7 +50,19 @@ local function load(path)
     return result
 end
 
-math.randomseed(os.getComputerID() + math.floor(os.clock() * 1000))
+-- Seed randomness using the computer, Minecraft day/time and runtime.
+local randomSeed =
+    (os.getComputerID() * 100000)
+    + ((os.day and os.day() or 0) * 24000)
+    + math.floor((os.time and os.time() or 0) * 1000)
+    + math.floor(os.clock() * 1000)
+
+math.randomseed(randomSeed)
+
+-- Discard the first few predictable values from Lua 5.1's generator.
+math.random()
+math.random()
+math.random()
 
 local themeLibrary = load("services/ui/theme.lua")
 local layoutLibrary = load("services/ui/layout.lua")
