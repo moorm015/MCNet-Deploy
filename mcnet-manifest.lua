@@ -1,69 +1,42 @@
 return {
     name = "MCNet",
-    version = "0.6.0",
+    version = "0.7.0",
+    protocol = 1,
+    entrypoint = "kernel/boot.lua",
+
+    remove = {
+        "mcnet.lua",
+        "kernel/console.lua"
+    },
 
     files = {
+        { source = "startup.lua", destination = "startup" },
+        { source = "kernel/boot.lua", destination = "kernel/boot.lua" },
+        { source = "kernel/app_manager.lua", destination = "kernel/app_manager.lua" },
 
-        -- Main Console
+        { source = "services/ui/theme.lua", destination = "services/ui/theme.lua" },
+        { source = "services/ui/layout.lua", destination = "services/ui/layout.lua" },
+        { source = "services/ui/logos.lua", destination = "services/ui/logos.lua" },
+        { source = "services/ui/ui.lua", destination = "services/ui/ui.lua" },
+        { source = "services/ui/loading.lua", destination = "services/ui/loading.lua" },
+        { source = "services/ui/menu.lua", destination = "services/ui/menu.lua" },
 
-        {
-            source = "mcnet.lua",
-            destination = "mcnet.lua"
-        },
+        { source = "services/system/settings.lua", destination = "services/system/settings.lua" },
+        { source = "services/system/device_config.lua", destination = "services/system/device_config.lua" },
+        { source = "services/system/diagnostics.lua", destination = "services/system/diagnostics.lua" },
 
-        -- Drivers
+        { source = "services/communications/packet.lua", destination = "services/communications/packet.lua" },
+        { source = "drivers/modem.lua", destination = "drivers/modem.lua" },
 
-        {
-            source = "drivers/modem.lua",
-            destination = "drivers/modem.lua"
-        },
+        { source = "applications/system/console.lua", destination = "applications/system/console.lua" },
+        { source = "applications/roles/generic.lua", destination = "applications/roles/generic.lua" },
+        { source = "applications/roles/pda.lua", destination = "applications/roles/pda.lua" },
+        { source = "applications/roles/station.lua", destination = "applications/roles/station.lua" },
+        { source = "applications/roles/tower.lua", destination = "applications/roles/tower.lua" },
 
-        -- System Services
-
-        {
-            source = "services/system/device_config.lua",
-            destination = "services/system/device_config.lua"
-        },
-
-        -- UI Services
-
-        {
-            source = "services/ui/theme.lua",
-            destination = "services/ui/theme.lua"
-        },
-
-        {
-            source = "services/ui/ui.lua",
-            destination = "services/ui/ui.lua"
-        },
-
-        {
-            source = "services/ui/menu.lua",
-            destination = "services/ui/menu.lua"
-        },
-
-        -- Communications
-
-        {
-            source = "services/communications/packet.lua",
-            destination = "services/communications/packet.lua"
-        },
-
-        -- Tests
-
-        {
-            source = "tests/communications/packet_test.lua",
-            destination = "tests/communications/packet_test.lua"
-        },
-
-        {
-            source = "tests/drivers/modem_test.lua",
-            destination = "tests/drivers/modem_test.lua"
-        },
-
-        {
-            source = "tests/system/device_config_test.lua",
-            destination = "tests/system/device_config_test.lua"
-        }
+        { source = "tests/communications/packet_test.lua", destination = "tests/communications/packet_test.lua" },
+        { source = "tests/drivers/modem_test.lua", destination = "tests/drivers/modem_test.lua" },
+        { source = "tests/system/device_config_test.lua", destination = "tests/system/device_config_test.lua" },
+        { source = "tests/ui/layout_test.lua", destination = "tests/ui/layout_test.lua" }
     }
 }

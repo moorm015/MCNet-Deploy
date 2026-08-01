@@ -1,324 +1,102 @@
---[[
-    MCNet Packet Library
-    Version: 0.1.0
+-- MCNet packet protocol
 
-    Implements MCNet Packet Protocol Version 1.
-]]
+local module = {}
+local PROTOCOL_VERSION = 1
+local DEFAULT_TTL = 16
 
-local packet = {}
-
--- Protocol settings
-
-packet.PROTOCOL_VERSION = 1
-packet.DEFAULT_TTL = 8
-packet.MAX_TTL = 32
-
--- Priority constants
-
-packet.PRIORITY = {
-    EMERGENCY = 1,
-    HIGH = 2,
-    NORMAL = 3,
-    LOW = 4,
-    BACKGROUND = 5
-}
-
--- Reserved MCNet services
-
-packet.SERVICE = {
-    COMMUNICATIONS = "COMMUNICATIONS",
-    ROUTING = "ROUTING",
-    DISCOVERY = "DISCOVERY",
-    LOGGING = "LOGGING",
-    SECURITY = "SECURITY",
-    UPDATE = "UPDATE",
-    RAIL = "RAIL",
-    POWER = "POWER",
-    LOGISTICS = "LOGISTICS",
-    DISPLAY = "DISPLAY",
-    BUILDING = "BUILDING",
-    SYSTEM = "SYSTEM"
-}
-
--- Reserved packet types
-
-packet.TYPE = {
-    HELLO = "HELLO",
-    MESSAGE = "MESSAGE",
-    PING = "PING",
-    PONG = "PONG",
-    DISCOVER = "DISCOVER",
-    ANNOUNCE = "ANNOUNCE",
-    ACK = "ACK",
-    ERROR = "ERROR",
-    STATUS = "STATUS",
-    UPDATE = "UPDATE",
-    LOG = "LOG",
-    COMMAND = "COMMAND",
-    RESPONSE = "RESPONSE",
-    HEARTBEAT = "HEARTBEAT"
-}
-
--- Reserved destinations
-
-packet.DESTINATION = {
-    BROADCAST = "BROADCAST",
-    SELF = "SELF",
-    LOCAL = "LOCAL",
-    UNKNOWN = "UNKNOWN"
-}
-
-local sequence = 0
-
-local function isNonEmptyString(value)
-    return type(value) == "string" and value ~= ""
+local function generateID(source)
+    local randomPart = math.random(100000, 999999)
+    local clockPart = math.floor(os.clock() * 1000)
+    return tostring(source or os.getComputerID()) .. "-" .. tostring(clockPart) .. "-" .. tostring(randomPart)
 end
 
-local function isInteger(value)
-    return type(value) == "number"
-        and value == math.floor(value)
-end
+function module.new(values)
+    values = values or {}
 
-local function normaliseAddress(address)
-    if type(address) ~= "string" then
-        return address
-    end
-
-    return string.upper(address)
-end
-
-local function createPacketID()
-    sequence = sequence + 1
-
-    local computerID = os.getComputerID()
-    local timeValue = math.floor(os.clock() * 1000)
-
-    return tostring(computerID)
-        .. "-"
-        .. tostring(timeValue)
-        .. "-"
-        .. tostring(sequence)
-end
-
--- Creates a new MCNet packet.
---
--- Required options:
---   source
---   destination
---   service
---   type
---
--- Optional options:
---   ttl
---   priority
---   payload
-
-function packet.create(options)
-    if type(options) ~= "table" then
-        error("packet.create expected an options table", 2)
-    end
-
-    local newPacket = {
-        version = packet.PROTOCOL_VERSION,
-        id = createPacketID(),
-
-        source = normaliseAddress(options.source),
-        destination = normaliseAddress(options.destination),
-
-        service = type(options.service) == "string"
-            and string.upper(options.service)
-            or options.service,
-
-        type = type(options.type) == "string"
-            and string.upper(options.type)
-            or options.type,
-
-        ttl = options.ttl,
-        priority = options.priority,
-        payload = options.payload
+    return {
+        protocol = tonumber(values.protocol) or PROTOCOL_VERSION,
+        id = values.id or generateID(values.source),
+        source = tostring(values.source or "UNKNOWN"),
+        destination = tostring(values.destination or "BROADCAST"),
+        service = tostring(values.service or "SYSTEM"),
+        type = tostring(values.type or "MESSAGE"),
+        priority = tonumber(values.priority) or 0,
+        ttl = tonumber(values.ttl) or DEFAULT_TTL,
+        payload = values.payload,
+        created = tonumber(values.created) or os.clock()
     }
-
-    if newPacket.ttl == nil then
-        newPacket.ttl = packet.DEFAULT_TTL
-    end
-
-    if newPacket.priority == nil then
-        newPacket.priority = packet.PRIORITY.NORMAL
-    end
-
-    local valid, reason = packet.validate(newPacket)
-
-    if not valid then
-        error("Cannot create packet: " .. reason, 2)
-    end
-
-    return newPacket
 end
 
--- Validates an MCNet logical address.
-
-function packet.validateAddress(address)
-    if not isNonEmptyString(address) then
-        return false, "Address must be a non-empty string"
+function module.validate(packet)
+    if type(packet) ~= "table" then
+        return false, "Packet must be a table"
     end
 
-    if address ~= string.upper(address) then
-        return false, "Address must be upper case"
+    if packet.protocol ~= PROTOCOL_VERSION then
+        return false, "Unsupported protocol version"
     end
 
-    if string.find(address, "[^A-Z0-9%-]") then
-        return false, "Address contains invalid characters"
-    end
-
-    if string.sub(address, 1, 1) == "-"
-        or string.sub(address, -1) == "-" then
-        return false, "Address cannot begin or end with a hyphen"
-    end
-
-    if string.find(address, "%-%-") then
-        return false, "Address cannot contain consecutive hyphens"
-    end
-
-    return true
-end
-
--- Validates a complete MCNet packet.
---
--- Returns:
---   true
---
--- or:
---   false, reason
-
-function packet.validate(value)
-    if type(value) ~= "table" then
-        return false, "Packet is not a table"
-    end
-
-    if value.version ~= packet.PROTOCOL_VERSION then
-        return false, "Unsupported packet protocol version"
-    end
-
-    if not isNonEmptyString(value.id) then
+    if type(packet.id) ~= "string" or packet.id == "" then
         return false, "Packet ID is missing"
     end
 
-    local validSource, sourceReason =
-        packet.validateAddress(value.source)
-
-    if not validSource then
-        return false, "Invalid source: " .. sourceReason
+    if type(packet.source) ~= "string" or packet.source == "" then
+        return false, "Packet source is missing"
     end
 
-    local validDestination, destinationReason =
-        packet.validateAddress(value.destination)
-
-    if not validDestination then
-        return false, "Invalid destination: " .. destinationReason
+    if type(packet.destination) ~= "string" or packet.destination == "" then
+        return false, "Packet destination is missing"
     end
 
-    if not isNonEmptyString(value.service) then
+    if type(packet.service) ~= "string" or packet.service == "" then
         return false, "Packet service is missing"
     end
 
-    if value.service ~= string.upper(value.service) then
-        return false, "Packet service must be upper case"
-    end
-
-    if not isNonEmptyString(value.type) then
+    if type(packet.type) ~= "string" or packet.type == "" then
         return false, "Packet type is missing"
     end
 
-    if value.type ~= string.upper(value.type) then
-        return false, "Packet type must be upper case"
-    end
-
-    if not isInteger(value.ttl) then
-        return false, "Packet TTL must be an integer"
-    end
-
-    if value.ttl < 0 or value.ttl > packet.MAX_TTL then
-        return false,
-            "Packet TTL must be between 0 and "
-            .. tostring(packet.MAX_TTL)
-    end
-
-    if not isInteger(value.priority) then
-        return false, "Packet priority must be an integer"
-    end
-
-    if value.priority < packet.PRIORITY.EMERGENCY
-        or value.priority > packet.PRIORITY.BACKGROUND then
-        return false, "Packet priority must be between 1 and 5"
+    if type(packet.ttl) ~= "number" or packet.ttl < 0 then
+        return false, "Packet TTL is invalid"
     end
 
     return true
 end
 
--- Reduces a packet's TTL before forwarding.
---
--- Returns true if it may still be forwarded.
--- Returns false and a reason if it must be dropped.
-
-function packet.decrementTTL(value)
-    local valid, reason = packet.validate(value)
-
+function module.decrementTTL(packet)
+    local valid, reason = module.validate(packet)
     if not valid then
         return false, reason
     end
 
-    if value.ttl <= 0 then
+    if packet.ttl <= 0 then
         return false, "Packet TTL has expired"
     end
 
-    value.ttl = value.ttl - 1
-
-    if value.ttl <= 0 then
-        return false, "Packet TTL has expired"
-    end
-
-    return true
+    packet.ttl = packet.ttl - 1
+    return true, packet.ttl
 end
 
--- Returns true when the packet is addressed to the local device.
-
-function packet.isForDevice(value, localAddress)
-    local valid, reason = packet.validate(value)
-
-    if not valid then
-        return false, reason
+function module.isFor(packet, address)
+    if not packet or not address then
+        return false
     end
 
-    localAddress = normaliseAddress(localAddress)
-
-    if value.destination == packet.DESTINATION.BROADCAST then
-        return true
-    end
-
-    if value.destination == packet.DESTINATION.SELF then
-        return true
-    end
-
-    return value.destination == localAddress
+    return packet.destination == address
+        or packet.destination == "BROADCAST"
+        or packet.destination == "*"
 end
 
--- Creates a response packet addressed back to the original sender.
-
-function packet.createResponse(original, source, responseType, payload)
-    local valid, reason = packet.validate(original)
-
-    if not valid then
-        error("Cannot respond to invalid packet: " .. reason, 2)
+function module.copy(packet)
+    local result = {}
+    for key, value in pairs(packet or {}) do
+        result[key] = value
     end
-
-    return packet.create({
-        source = source,
-        destination = original.source,
-        service = original.service,
-        type = responseType,
-        priority = original.priority,
-        payload = payload
-    })
+    return result
 end
 
-return packet
+function module.getProtocolVersion()
+    return PROTOCOL_VERSION
+end
+
+return module

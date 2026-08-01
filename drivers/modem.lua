@@ -1,316 +1,167 @@
---[[
-    MCNet Modem Driver
-    Version: 0.1.0
+-- MCNet modem driver
 
-    Implements MCNet Modem Driver Specification Version 1.
-]]
-
-local packet = dofile("services/communications/packet.lua")
-
-local modemDriver = {}
-
--- MCNet channel allocation
-
-modemDriver.CHANNEL = {
-    DATA = 43000,
-    DISCOVERY = 43001,
-    CONTROL = 43002,
-    UPDATE = 43003,
-    EMERGENCY = 43004
-}
-
-modemDriver.DEFAULT_CHANNEL = modemDriver.CHANNEL.DATA
-modemDriver.MIN_CHANNEL = 0
-modemDriver.MAX_CHANNEL = 65535
-
+local module = {}
+local DEFAULT_CHANNEL = 4242
 local modem = nil
-local modemSide = nil
+local modemName = nil
 
-local mcnetChannels = {
-    modemDriver.CHANNEL.DATA,
-    modemDriver.CHANNEL.DISCOVERY,
-    modemDriver.CHANNEL.CONTROL,
-    modemDriver.CHANNEL.UPDATE,
-    modemDriver.CHANNEL.EMERGENCY
-}
-
-local peripheralSides = {
-    "top",
-    "bottom",
-    "left",
-    "right",
-    "front",
-    "back"
-}
-
-local function isInteger(value)
-    return type(value) == "number"
-        and value == math.floor(value)
-end
-
-local function validateChannel(channel)
-    if not isInteger(channel) then
-        return false, "Invalid modem channel: channel must be an integer"
+local function peripheralNames()
+    if peripheral.getNames then
+        return peripheral.getNames()
     end
 
-    if channel < modemDriver.MIN_CHANNEL
-        or channel > modemDriver.MAX_CHANNEL then
-        return false,
-            "Invalid modem channel: channel must be between "
-            .. tostring(modemDriver.MIN_CHANNEL)
-            .. " and "
-            .. tostring(modemDriver.MAX_CHANNEL)
+    if rs and rs.getSides then
+        return rs.getSides()
     end
 
-    return true
+    return {}
 end
 
-local function findModem()
-    for _, side in ipairs(peripheralSides) do
-        if peripheral.isPresent(side)
-            and peripheral.getType(side) == "modem" then
+function module.detect(force)
+    if modem and not force then
+        return modem, modemName
+    end
 
-            local wrapped = peripheral.wrap(side)
+    modem = nil
+    modemName = nil
 
+    for _, name in ipairs(peripheralNames()) do
+        local peripheralType = peripheral.getType and peripheral.getType(name) or nil
+
+        if peripheralType == "modem" and peripheral.wrap then
+            local wrapped = peripheral.wrap(name)
             if wrapped then
-                return wrapped, side
+                modem = wrapped
+                modemName = name
+                return modem, modemName
             end
         end
     end
 
-    return nil, nil
+    return nil, "No modem detected"
 end
 
-local function ensureModem()
-    if modem and modemSide then
-        if peripheral.isPresent(modemSide)
-            and peripheral.getType(modemSide) == "modem" then
-            return true
-        end
-
-        modem = nil
-        modemSide = nil
-    end
-
-    modem, modemSide = findModem()
-
+function module.getName()
     if not modem then
-        return false, "No modem found"
+        module.detect()
     end
-
-    return true
+    return modemName
 end
 
-local function transmit(value, channel)
-    local available, modemReason = ensureModem()
-
-    if not available then
-        return false, modemReason
+function module.getModem()
+    if not modem then
+        module.detect()
     end
-
-    local validChannel, channelReason = validateChannel(channel)
-
-    if not validChannel then
-        return false, channelReason
-    end
-
-    local validPacket, packetReason = packet.validate(value)
-
-    if not validPacket then
-        return false, "Invalid MCNet packet: " .. tostring(packetReason)
-    end
-
-    if not modem.isOpen(channel) then
-        return false,
-            "Modem channel "
-            .. tostring(channel)
-            .. " is not open"
-    end
-
-    modem.transmit(channel, channel, value)
-
-    return true
+    return modem
 end
 
--- Opens all standard MCNet modem channels.
+function module.isWireless()
+    local found = module.getModem()
+    if found and found.isWireless then
+        return found.isWireless()
+    end
+    return false
+end
 
-function modemDriver.open()
-    local available, reason = ensureModem()
+function module.open(channel)
+    channel = tonumber(channel) or DEFAULT_CHANNEL
+    local found, reason = module.detect()
 
-    if not available then
+    if not found then
         return false, reason
     end
 
-    for _, channel in ipairs(mcnetChannels) do
-        if not modem.isOpen(channel) then
-            modem.open(channel)
-        end
-    end
-
-    return true
+    found.open(channel)
+    return true, modemName
 end
 
--- Closes only the channels owned by MCNet.
+function module.close(channel)
+    channel = tonumber(channel) or DEFAULT_CHANNEL
+    local found, reason = module.detect()
 
-function modemDriver.close()
-    local available, reason = ensureModem()
-
-    if not available then
+    if not found then
         return false, reason
     end
 
-    for _, channel in ipairs(mcnetChannels) do
-        if modem.isOpen(channel) then
-            modem.close(channel)
-        end
+    found.close(channel)
+    return true
+end
+
+function module.closeAll()
+    local found, reason = module.detect()
+
+    if not found then
+        return false, reason
+    end
+
+    if found.closeAll then
+        found.closeAll()
+    else
+        found.close(DEFAULT_CHANNEL)
     end
 
     return true
 end
 
--- Returns true when the default MCNet channel is open.
+function module.isOpen(channel)
+    channel = tonumber(channel) or DEFAULT_CHANNEL
+    local found = module.getModem()
 
-function modemDriver.isOpen()
-    local available = ensureModem()
-
-    if not available then
+    if not found or not found.isOpen then
         return false
     end
 
-    return modem.isOpen(modemDriver.DEFAULT_CHANNEL)
+    return found.isOpen(channel)
 end
 
--- Returns the side containing the active modem.
+function module.send(channel, replyChannel, message)
+    channel = tonumber(channel) or DEFAULT_CHANNEL
+    replyChannel = tonumber(replyChannel) or channel
+    local found, reason = module.detect()
 
-function modemDriver.getSide()
-    local available = ensureModem()
-
-    if not available then
-        return nil
+    if not found then
+        return false, reason
     end
 
-    return modemSide
+    found.transmit(channel, replyChannel, message)
+    return true
 end
 
--- Returns true when a specific channel is open.
+function module.receive(channel, timeout)
+    channel = tonumber(channel) or DEFAULT_CHANNEL
+    timeout = tonumber(timeout)
 
-function modemDriver.isChannelOpen(channel)
-    local validChannel = validateChannel(channel)
-
-    if not validChannel then
-        return false
+    local opened, reason = module.open(channel)
+    if not opened then
+        return nil, reason
     end
 
-    local available = ensureModem()
-
-    if not available then
-        return false
-    end
-
-    return modem.isOpen(channel)
-end
-
--- Sends a validated MCNet packet.
---
--- If no channel is supplied, the normal MCNet data channel is used.
-
-function modemDriver.send(value, channel)
-    if channel == nil then
-        channel = modemDriver.DEFAULT_CHANNEL
-    end
-
-    return transmit(value, channel)
-end
-
--- Sends a packet whose destination is BROADCAST.
-
-function modemDriver.broadcast(value, channel)
-    local validPacket, packetReason = packet.validate(value)
-
-    if not validPacket then
-        return false, "Invalid MCNet packet: " .. tostring(packetReason)
-    end
-
-    if value.destination ~= packet.DESTINATION.BROADCAST then
-        return false, "Packet destination is not BROADCAST"
-    end
-
-    if channel == nil then
-        channel = modemDriver.DEFAULT_CHANNEL
-    end
-
-    return transmit(value, channel)
-end
-
--- Waits for a valid MCNet packet.
---
--- Returns:
---   receivedPacket, metadata
---
--- On timeout:
---   nil, "timeout"
-
-function modemDriver.receive(timeout)
-    local available, modemReason = ensureModem()
-
-    if not available then
-        return nil, modemReason
-    end
-
-    if not modemDriver.isOpen() then
-        return nil, "Modem is not open"
-    end
-
-    if timeout ~= nil then
-        if type(timeout) ~= "number" or timeout < 0 then
-            return nil,
-                "Receive timeout must be a non-negative number"
-        end
-    end
-
-    local timerID = nil
-
-    if timeout ~= nil then
-        timerID = os.startTimer(timeout)
+    local timer = nil
+    if timeout and timeout > 0 and os.startTimer then
+        timer = os.startTimer(timeout)
     end
 
     while true do
-        local event = {
-            os.pullEvent()
-        }
+        local event = { os.pullEvent() }
 
-        local eventName = event[1]
-
-        if eventName == "timer"
-            and timerID ~= nil
-            and event[2] == timerID then
-            return nil, "timeout"
+        if event[1] == "modem_message" and event[3] == channel then
+            return {
+                side = event[2],
+                channel = event[3],
+                replyChannel = event[4],
+                message = event[5],
+                distance = event[6]
+            }
         end
 
-        if eventName == "modem_message" then
-            local side = event[2]
-            local channel = event[3]
-            local replyChannel = event[4]
-            local message = event[5]
-            local distance = event[6]
-
-            local isOpenChannel =
-                modem.isOpen(channel)
-
-            if side == modemSide and isOpenChannel then
-                local validPacket = packet.validate(message)
-
-                if validPacket then
-                    return message, {
-                        side = side,
-                        channel = channel,
-                        replyChannel = replyChannel,
-                        distance = distance
-                    }
-                end
-            end
+        if event[1] == "timer" and timer and event[2] == timer then
+            return nil, "timeout"
         end
     end
 end
 
-return modemDriver
+function module.getDefaultChannel()
+    return DEFAULT_CHANNEL
+end
+
+return module

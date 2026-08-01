@@ -1,267 +1,233 @@
---[[
-    MCNet Device Configuration
-    Version: 0.5.1
+-- MCNet persistent device identity
 
-    Loads, validates and saves the local MCNet device identity.
-]]
+local module = {}
+local PATH = ".mcnet/device.lua"
 
-local packet = dofile("services/communications/packet.lua")
+local deviceTypes = {
+    "SERVER",
+    "TOWER",
+    "PDA",
+    "COMPUTER",
+    "TRAIN",
+    "STATION",
+    "POWER",
+    "STORAGE",
+    "DISPLAY",
+    "SECURITY",
+    "BUILDING",
+    "COMMAND",
+    "OBSERVATORY",
+    "FACTORY",
+    "VILLAGE",
+    "TEST",
+    "UNKNOWN"
+}
 
-local deviceConfig = {}
-
-deviceConfig.DEFAULT_PATH = ".mcnet/device.lua"
-
-deviceConfig.TYPE = {
-    UNKNOWN = "UNKNOWN",
-    TOWER = "TOWER",
+local prefixes = {
+    SERVER = "SRV",
+    TOWER = "TWR",
     PDA = "PDA",
-    TRAIN = "TRAIN",
-    STATION = "STATION",
-    POWER = "POWER",
-    STORAGE = "STORAGE",
-    DISPLAY = "DISPLAY",
-    SECURITY = "SECURITY",
-    BUILDING = "BUILDING",
-    SERVER = "SERVER",
-    TEST = "TEST"
+    COMPUTER = "PC",
+    TRAIN = "TRN",
+    STATION = "STN",
+    POWER = "PWR",
+    STORAGE = "STR",
+    DISPLAY = "DSP",
+    SECURITY = "SEC",
+    BUILDING = "BLD",
+    COMMAND = "CMD",
+    OBSERVATORY = "OBS",
+    FACTORY = "FAC",
+    VILLAGE = "VIL",
+    TEST = "TST",
+    UNKNOWN = "MCN"
 }
 
-deviceConfig.STATUS = {
-    ONLINE = "ONLINE",
-    OFFLINE = "OFFLINE",
-    MAINTENANCE = "MAINTENANCE"
-}
-
-local function isNonEmptyString(value)
-    return type(value) == "string" and value ~= ""
-end
-
-local function normalise(value)
-    if type(value) ~= "string" then
-        return value
+local function isDeviceType(value)
+    for _, deviceType in ipairs(deviceTypes) do
+        if value == deviceType then
+            return true
+        end
     end
-
-    return string.upper(value)
+    return false
 end
 
-local function copyTable(source)
-    local result = {}
-
-    for key, value in pairs(source) do
-        result[key] = value
-    end
-
-    return result
+local function cleanIdentifier(value)
+    value = string.upper(tostring(value or ""))
+    value = string.gsub(value, "%s+", "-")
+    value = string.gsub(value, "[^A-Z0-9%-_]", "")
+    return value
 end
 
--- Returns a new default device record.
+function module.getSuggestedAddress(deviceType)
+    deviceType = string.upper(tostring(deviceType or "UNKNOWN"))
+    local prefix = prefixes[deviceType] or prefixes.UNKNOWN
+    return prefix .. "-" .. string.format("%03d", os.getComputerID())
+end
 
-function deviceConfig.createDefault()
+function module.getSuggestedSystemName(deviceType)
+    return "MCNET-" .. module.getSuggestedAddress(deviceType)
+end
+
+function module.createDefault(version, protocol)
     return {
         address = "UNKNOWN",
-        name = "Unconfigured Device",
-        type = deviceConfig.TYPE.UNKNOWN,
+        systemName = "MCNET-" .. tostring(os.getComputerID()),
+        friendlyName = "",
+        name = "",
+        type = "UNKNOWN",
         region = "UNKNOWN",
         owner = "MCNet",
-        status = deviceConfig.STATUS.OFFLINE,
+        status = "OFFLINE",
         computerID = os.getComputerID(),
-        version = "0.5.1"
+        version = version or "UNKNOWN",
+        protocol = protocol or 1
     }
 end
 
--- Normalises fields which use fixed upper-case values.
+function module.normalise(config, version, protocol)
+    local result = module.createDefault(version, protocol)
+    config = config or {}
 
-function deviceConfig.normalise(config)
-    if type(config) ~= "table" then
-        return config
+    for key, value in pairs(config) do
+        result[key] = value
     end
 
-    local result = copyTable(config)
+    if config.name and not config.friendlyName then
+        result.friendlyName = config.name
+    end
 
-    result.address = normalise(result.address)
-    result.type = normalise(result.type)
-    result.region = normalise(result.region)
-    result.status = normalise(result.status)
+    result.address = cleanIdentifier(result.address)
+    if result.address == "" then
+        result.address = "UNKNOWN"
+    end
+
+    result.systemName = cleanIdentifier(result.systemName)
+    if result.systemName == "" then
+        result.systemName = "MCNET-" .. tostring(os.getComputerID())
+    end
+
+    result.friendlyName = tostring(result.friendlyName or "")
+    result.name = result.friendlyName
+    result.type = string.upper(tostring(result.type or "UNKNOWN"))
+
+    if not isDeviceType(result.type) then
+        result.type = "UNKNOWN"
+    end
+
+    result.region = cleanIdentifier(result.region)
+    if result.region == "" then
+        result.region = "UNKNOWN"
+    end
+
+    result.owner = tostring(result.owner or "MCNet")
+    result.status = string.upper(tostring(result.status or "OFFLINE"))
+
+    if result.status ~= "ONLINE" and result.status ~= "OFFLINE" and result.status ~= "MAINTENANCE" then
+        result.status = "OFFLINE"
+    end
+
+    result.computerID = os.getComputerID()
+    result.version = version or result.version or "UNKNOWN"
+    result.protocol = protocol or result.protocol or 1
 
     return result
 end
 
--- Validates an MCNet device record.
-
-function deviceConfig.validate(config)
+function module.validate(config)
     if type(config) ~= "table" then
-        return false, "Device configuration must be a table"
+        return false, "Configuration must be a table"
     end
 
-    local validAddress, addressReason =
-        packet.validateAddress(config.address)
-
-    if not validAddress then
-        return false,
-            "Invalid device address: "
-            .. tostring(addressReason)
+    if not config.address or config.address == "" or config.address == "UNKNOWN" then
+        return false, "MCNet address must be configured"
     end
 
-    if not isNonEmptyString(config.name) then
-        return false, "Friendly name must be a non-empty string"
+    if not config.systemName or config.systemName == "" then
+        return false, "System name is required"
     end
 
-    if not isNonEmptyString(config.type) then
-        return false, "Device type must be a non-empty string"
-    end
-
-    if config.type ~= string.upper(config.type) then
-        return false, "Device type must be upper case"
-    end
-
-    if not isNonEmptyString(config.region) then
-        return false, "Region must be a non-empty string"
-    end
-
-    if config.region ~= string.upper(config.region) then
-        return false, "Region must be upper case"
-    end
-
-    if not isNonEmptyString(config.owner) then
-        return false, "Owner must be a non-empty string"
-    end
-
-    if not isNonEmptyString(config.status) then
-        return false, "Status must be a non-empty string"
-    end
-
-    if config.status ~= string.upper(config.status) then
-        return false, "Status must be upper case"
-    end
-
-    if type(config.computerID) ~= "number" then
-        return false, "Computer ID must be a number"
-    end
-
-    if not isNonEmptyString(config.version) then
-        return false, "Software version must be a non-empty string"
+    if not isDeviceType(config.type) or config.type == "UNKNOWN" then
+        return false, "Device type must be selected"
     end
 
     return true
 end
 
--- Returns true when a configuration file exists.
-
-function deviceConfig.exists(path)
-    path = path or deviceConfig.DEFAULT_PATH
-
-    return fs.exists(path) and not fs.isDir(path)
+function module.isConfigured(config)
+    local valid = module.validate(config)
+    return valid == true
 end
 
--- Saves a device configuration.
---
--- The optional path exists mainly for automated testing.
+function module.getDisplayName(config)
+    config = config or {}
 
-function deviceConfig.save(config, path)
-    path = path or deviceConfig.DEFAULT_PATH
+    if config.friendlyName and config.friendlyName ~= "" then
+        return config.friendlyName
+    end
 
-    config = deviceConfig.normalise(config)
+    if config.systemName and config.systemName ~= "" then
+        return config.systemName
+    end
 
-    local valid, reason = deviceConfig.validate(config)
+    return config.address or "Unconfigured Device"
+end
 
+function module.load(path, version, protocol)
+    path = path or PATH
+
+    if not fs.exists(path) then
+        return module.createDefault(version, protocol)
+    end
+
+    local loaded, config = pcall(dofile, path)
+    if not loaded or type(config) ~= "table" then
+        return module.createDefault(version, protocol)
+    end
+
+    return module.normalise(config, version, protocol)
+end
+
+function module.save(config, path, version, protocol)
+    path = path or PATH
+    config = module.normalise(config, version, protocol)
+
+    local valid, reason = module.validate(config)
     if not valid then
         return false, reason
     end
 
     local directory = fs.getDir(path)
-
     if directory ~= "" and not fs.exists(directory) then
         fs.makeDir(directory)
     end
 
-    local temporaryPath = path .. ".tmp"
-
-    if fs.exists(temporaryPath) then
-        fs.delete(temporaryPath)
-    end
-
-    local file = fs.open(temporaryPath, "w")
-
+    local file = fs.open(path, "w")
     if not file then
-        return false, "Could not open configuration file for writing"
+        return false, "Could not open device configuration file"
     end
 
     file.write("return ")
     file.write(textutils.serialize(config))
     file.write("\n")
     file.close()
-
-    if fs.exists(path) then
-        fs.delete(path)
-    end
-
-    fs.move(temporaryPath, path)
-
     return true
 end
 
--- Loads an existing configuration.
---
--- If no configuration exists, a default record is returned with
--- a second return value of "missing".
+function module.getTypes(includeUnknown)
+    local result = {}
 
-function deviceConfig.load(path)
-    path = path or deviceConfig.DEFAULT_PATH
-
-    if not deviceConfig.exists(path) then
-        return deviceConfig.createDefault(), "missing"
+    for _, value in ipairs(deviceTypes) do
+        if includeUnknown or value ~= "UNKNOWN" then
+            table.insert(result, value)
+        end
     end
 
-    local success, loaded = pcall(dofile, path)
-
-    if not success then
-        return nil,
-            "Could not load device configuration: "
-            .. tostring(loaded)
-    end
-
-    loaded = deviceConfig.normalise(loaded)
-
-    local valid, reason = deviceConfig.validate(loaded)
-
-    if not valid then
-        return nil,
-            "Invalid device configuration: "
-            .. tostring(reason)
-    end
-
-    return loaded
+    return result
 end
 
--- Creates the default configuration only when one does not already exist.
-
-function deviceConfig.initialise(path)
-    path = path or deviceConfig.DEFAULT_PATH
-
-    if deviceConfig.exists(path) then
-        return true, "existing"
-    end
-
-    local config = deviceConfig.createDefault()
-    local saved, reason = deviceConfig.save(config, path)
-
-    if not saved then
-        return false, reason
-    end
-
-    return true, "created"
+function module.getPath()
+    return PATH
 end
 
--- Returns the configured logical address.
-
-function deviceConfig.getAddress(path)
-    local config, reason = deviceConfig.load(path)
-
-    if not config then
-        return nil, reason
-    end
-
-    return config.address
-end
-
-return deviceConfig
+return module

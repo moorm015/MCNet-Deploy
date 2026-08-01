@@ -1,1054 +1,327 @@
---[[
-    MCNet Console
-    Version: 0.6.0
+-- MCNet standalone installer
+-- Version 1.0.0
+--
+-- This program deliberately depends on no installed MCNet files.
+-- It downloads the manifest, stages every listed file, commits the
+-- installation, performs manifest removals, and writes install metadata.
 
-    Installation, device configuration and diagnostic console.
-]]
-
-local CONSOLE_VERSION = "0.6.0"
-local PROTOCOL_VERSION = 1
-
-local BASE_URL =
-    "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
-
+local BASE_URL = "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
 local MANIFEST_REMOTE = "mcnet-manifest.lua"
 local MANIFEST_LOCAL = ".mcnet-manifest.lua"
+local STAGE_ROOT = ".mcnet-stage"
+local INSTALL_STATE = ".mcnet/install_state.lua"
 
-local DEVICE_CONFIG_MODULE =
-    "services/system/device_config.lua"
+local width, height = term.getSize()
+local hasColour = false
 
-local DEVICE_CONFIG_PATH =
-    ".mcnet/device.lua"
-
-local theme = dofile("services/ui/theme.lua")
-local ui = dofile("services/ui/ui.lua")
-local menu = dofile("services/ui/menu.lua")
-
-local THEME = theme
-
-local screenWidth, screenHeight = ui.getSize()
-local compactMode = ui.isCompact()
-local supportsColour = ui.supportsColour()
-
-local setTextColour = ui.setTextColour
-local setBackgroundColour = ui.setBackgroundColour
-local resetColours = ui.resetColours
-local clear = ui.clear
-local centreAt = ui.centreAt
-local drawProgressBar = ui.drawProgressBar
-local transition = ui.transition
-local pause = ui.pause
-local askYesNo = ui.askYesNo
-local readDefault = ui.readDefault
-
-local function drawHeader(pageTitle, device)
-    screenWidth, screenHeight = ui.getSize()
-    compactMode = ui.isCompact()
-    return ui.drawHeader(
-        pageTitle,
-        device,
-        CONSOLE_VERSION
-    )
+if term.isColor then
+    hasColour = term.isColor()
+elseif term.isColour then
+    hasColour = term.isColour()
 end
 
-local function chooseMenu(title, options, device)
-    screenWidth, screenHeight = ui.getSize()
-    compactMode = ui.isCompact()
-    return menu.choose(
-        title,
-        options,
-        device,
-        CONSOLE_VERSION
-    )
+local function setText(colour)
+    if hasColour then
+        term.setTextColor(colour)
+    end
 end
 
-local function downloadFile(
-    source,
-    destination,
-    index,
-    total
-)
-    local response, reason =
-        http.get(BASE_URL .. source)
+local function setBackground(colour)
+    if hasColour then
+        term.setBackgroundColor(colour)
+    end
+end
 
-    if not response then
-        return false,
-            "Could not download "
-            .. source
-            .. ": "
-            .. tostring(reason)
+local function resetColours()
+    setBackground(colors.black)
+    setText(colors.white)
+end
+
+local function refreshSize()
+    width, height = term.getSize()
+end
+
+local function clear()
+    refreshSize()
+    resetColours()
+    term.clear()
+    term.setCursorPos(1, 1)
+end
+
+local function clip(value, maximum)
+    local text = tostring(value or "")
+    maximum = math.max(0, maximum or width)
+
+    if #text <= maximum then
+        return text
     end
 
-    local contents =
-        response.readAll()
-
-    response.close()
-
-    local directory =
-        fs.getDir(destination)
-
-    if directory ~= ""
-        and not fs.exists(directory) then
-        fs.makeDir(directory)
+    if maximum <= 3 then
+        return string.sub(text, 1, maximum)
     end
 
-    local temporaryPath =
-        destination .. ".download"
+    return string.sub(text, 1, maximum - 3) .. "..."
+end
 
-    if fs.exists(temporaryPath) then
-        fs.delete(temporaryPath)
+local function centre(y, text, colour)
+    refreshSize()
+    text = clip(text, width)
+    local x = math.max(1, math.floor((width - #text) / 2) + 1)
+    term.setCursorPos(x, y)
+    if colour then
+        setText(colour)
+    end
+    write(text)
+end
+
+local function header(subtitle)
+    clear()
+    centre(1, "MCNet Installer", colors.lime)
+    centre(2, string.rep("=", math.min(15, width)), colors.green)
+    if subtitle then
+        centre(4, subtitle, colors.lightGray)
+    end
+    resetColours()
+end
+
+local function progress(current, total, label)
+    refreshSize()
+    local y = math.max(6, math.min(height - 3, 11))
+    local barWidth = math.max(8, math.min(30, width - 8))
+    local fraction = 0
+
+    if total > 0 then
+        fraction = current / total
     end
 
-    local file =
-        fs.open(temporaryPath, "w")
+    fraction = math.max(0, math.min(1, fraction))
+    local filled = math.floor(barWidth * fraction)
+    local bar = "[" .. string.rep("=", filled) .. string.rep(" ", barWidth - filled) .. "]"
 
-    if not file then
-        return false,
-            "Could not write "
-            .. destination
+    centre(y, bar, colors.green)
+    centre(y + 1, tostring(current) .. "/" .. tostring(total), colors.white)
+    centre(y + 2, clip(label or "", math.max(1, width - 4)), colors.lightGray)
+    resetColours()
+end
+
+local function safePath(path)
+    if type(path) ~= "string" or path == "" then
+        return false
     end
 
-    file.write(contents)
-    file.close()
-
-    if fs.exists(destination) then
-        fs.delete(destination)
+    if string.sub(path, 1, 1) == "/" then
+        return false
     end
 
-    fs.move(
-        temporaryPath,
-        destination
-    )
-
-    if index and total then
-        drawProgressBar(
-            math.min(screenHeight - 5, 12),
-            index / total,
-            "Installed "
-                .. tostring(index)
-                .. " of "
-                .. tostring(total)
-        )
+    if string.find(path, "..", 1, true) then
+        return false
     end
 
     return true
 end
 
-local function loadManifest()
-    local downloaded, reason =
-        downloadFile(
-            MANIFEST_REMOTE,
-            MANIFEST_LOCAL
-        )
+local function ensureDirectory(path)
+    local directory = fs.getDir(path)
+    if directory ~= "" and not fs.exists(directory) then
+        fs.makeDir(directory)
+    end
+end
 
-    if not downloaded then
+local function writeFile(path, contents)
+    ensureDirectory(path)
+
+    if fs.exists(path) then
+        fs.delete(path)
+    end
+
+    local file = fs.open(path, "w")
+    if not file then
+        return false, "Could not write " .. path
+    end
+
+    file.write(contents)
+    file.close()
+    return true
+end
+
+local function downloadText(path)
+    if not http or not http.get then
+        return nil, "HTTP is disabled or unavailable"
+    end
+
+    local response, reason = http.get(BASE_URL .. path)
+    if not response then
+        return nil, "Could not download " .. path .. ": " .. tostring(reason)
+    end
+
+    local contents = response.readAll()
+    response.close()
+
+    if not contents or #contents == 0 then
+        return nil, "Downloaded file was empty: " .. path
+    end
+
+    return contents
+end
+
+local function loadManifest()
+    local contents, reason = downloadText(MANIFEST_REMOTE)
+    if not contents then
         return nil, reason
     end
 
-    local success, manifest =
-        pcall(
-            dofile,
-            MANIFEST_LOCAL
-        )
-
-    if not success then
-        return nil,
-            "Could not load manifest: "
-            .. tostring(manifest)
+    local written, writeReason = writeFile(MANIFEST_LOCAL, contents)
+    if not written then
+        return nil, writeReason
     end
 
-    if type(manifest) ~= "table"
-        or type(manifest.files) ~= "table" then
-        return nil,
-            "Manifest has an invalid format"
+    local loaded, manifest = pcall(dofile, MANIFEST_LOCAL)
+    if not loaded then
+        return nil, "Manifest error: " .. tostring(manifest)
+    end
+
+    if type(manifest) ~= "table" or type(manifest.files) ~= "table" then
+        return nil, "Manifest format is invalid"
+    end
+
+    if #manifest.files == 0 then
+        return nil, "Manifest does not contain any files"
     end
 
     return manifest
 end
 
-local function loadDeviceConfigModule()
-    if not fs.exists(
-        DEVICE_CONFIG_MODULE
-    ) then
-        return nil,
-            "Device configuration module is not installed"
+local function cleanStage()
+    if fs.exists(STAGE_ROOT) then
+        fs.delete(STAGE_ROOT)
     end
-
-    local success, module =
-        pcall(
-            dofile,
-            DEVICE_CONFIG_MODULE
-        )
-
-    if not success then
-        return nil,
-            "Could not load device configuration module: "
-            .. tostring(module)
-    end
-
-    return module
 end
 
-local function getDevice()
-    local module =
-        loadDeviceConfigModule()
+local function writeInstallState(manifest)
+    ensureDirectory(INSTALL_STATE)
 
-    if not module then
-        return {
-            address = "UNKNOWN",
-            name = "Unconfigured Device",
-            type = "UNKNOWN",
-            region = "UNKNOWN",
-            owner = "MCNet",
-            status = "OFFLINE",
-            computerID = os.getComputerID(),
-            version = CONSOLE_VERSION
-        }
+    local state = {
+        name = manifest.name or "MCNet",
+        version = manifest.version or "UNKNOWN",
+        protocol = manifest.protocol or 1,
+        entrypoint = manifest.entrypoint or "kernel/boot.lua",
+        files = #manifest.files,
+        computerID = os.getComputerID()
+    }
+
+    local file = fs.open(INSTALL_STATE, "w")
+    if not file then
+        return false, "Could not write install metadata"
     end
 
-    local config =
-        module.load(
-            DEVICE_CONFIG_PATH
-        )
-
-    if not config then
-        return module.createDefault()
-    end
-
-    return config
+    file.write("return ")
+    file.write(textutils.serialize(state))
+    file.write("\n")
+    file.close()
+    return true
 end
 
-local function installMCNet()
-    transition(
-        "Contacting deployment server..."
-    )
+local function install()
+    cleanStage()
+    header("Contacting deployment server...")
 
-    drawHeader(
-        "Install or update MCNet"
-    )
-
-    print("Downloading deployment manifest...")
-    print("")
-
-    local manifest, reason =
-        loadManifest()
-
+    local manifest, reason = loadManifest()
     if not manifest then
-        setTextColour(THEME.error)
-        print(reason)
-        resetColours()
-        pause()
-        return false
+        error(reason, 0)
     end
 
-    local name =
-        manifest.name or "MCNet"
-
-    local version =
-        manifest.version or "UNKNOWN"
-
-    print(
-        "Package : "
-        .. tostring(name)
-    )
-
-    print(
-        "Version : "
-        .. tostring(version)
-    )
-
-    print(
-        "Files   : "
-        .. tostring(#manifest.files)
-    )
-
+    header("Preparing " .. tostring(manifest.name or "MCNet"))
+    print("")
+    print("Package : " .. tostring(manifest.name or "MCNet"))
+    print("Version : " .. tostring(manifest.version or "UNKNOWN"))
+    print("Files   : " .. tostring(#manifest.files))
     print("")
 
-    local installed = 0
-    local failures = {}
+    fs.makeDir(STAGE_ROOT)
+    local staged = {}
 
-    local progressY =
-        math.min(screenHeight - 5, 12)
-
-    drawProgressBar(
-        progressY,
-        0,
-        "Preparing installation..."
-    )
-
-    for index, entry in ipairs(
-        manifest.files
-    ) do
-        local success, fileReason =
-            downloadFile(
-                entry.source,
-                entry.destination,
-                index,
-                #manifest.files
-            )
-
-        if success then
-            installed =
-                installed + 1
-        else
-            table.insert(
-                failures,
-                fileReason
-            )
+    for index, entry in ipairs(manifest.files) do
+        if type(entry) ~= "table" then
+            cleanStage()
+            error("Invalid manifest entry " .. tostring(index), 0)
         end
 
-        sleep(0.08)
+        if not safePath(entry.source) or not safePath(entry.destination) then
+            cleanStage()
+            error("Unsafe manifest path in entry " .. tostring(index), 0)
+        end
+
+        progress(index - 1, #manifest.files, "Downloading " .. entry.source)
+
+        local contents, downloadReason = downloadText(entry.source)
+        if not contents then
+            cleanStage()
+            error(downloadReason, 0)
+        end
+
+        local stagedPath = STAGE_ROOT .. "/" .. string.format("%03d", index) .. ".file"
+        local written, writeReason = writeFile(stagedPath, contents)
+        if not written then
+            cleanStage()
+            error(writeReason, 0)
+        end
+
+        table.insert(staged, {
+            stagedPath = stagedPath,
+            destination = entry.destination
+        })
+
+        sleep(0.02)
     end
 
-    clear()
+    progress(#manifest.files, #manifest.files, "Committing installation")
 
-    drawHeader(
-        "Installation complete"
-    )
+    for _, item in ipairs(staged) do
+        ensureDirectory(item.destination)
 
-    print(
-        "Installed: "
-        .. tostring(installed)
-    )
+        if fs.exists(item.destination) then
+            fs.delete(item.destination)
+        end
 
-    print(
-        "Failed   : "
-        .. tostring(#failures)
-    )
+        fs.move(item.stagedPath, item.destination)
+    end
 
-    print("")
-
-    if #failures == 0 then
-        setTextColour(THEME.success)
-        print(
-            "MCNet "
-            .. tostring(version)
-            .. " installed successfully."
-        )
-
-        resetColours()
-
-        print("")
-        print(
-            "The console may have updated itself."
-        )
-
-        print(
-            "Restart MCNet after leaving this screen."
-        )
-    else
-        setTextColour(THEME.error)
-        print("Some files could not be installed.")
-        resetColours()
-        print("")
-
-        for _, failure in ipairs(
-            failures
-        ) do
-            print("- " .. tostring(failure))
+    if type(manifest.remove) == "table" then
+        for _, path in ipairs(manifest.remove) do
+            if safePath(path) and fs.exists(path) then
+                fs.delete(path)
+            end
         end
     end
 
+    local metadataWritten, metadataReason = writeInstallState(manifest)
+    if not metadataWritten then
+        cleanStage()
+        error(metadataReason, 0)
+    end
+
+    cleanStage()
+    header("Installation complete")
     print("")
-
-    if #failures == 0
-        and askYesNo(
-            "Would you like to run tests now?"
-        ) then
-        return true, "tests"
-    end
-
-    pause()
-
-    return #failures == 0
-end
-
-local deviceTypes = {
-    "SERVER",
-    "TOWER",
-    "PDA",
-    "TRAIN",
-    "STATION",
-    "POWER",
-    "STORAGE",
-    "DISPLAY",
-    "SECURITY",
-    "BUILDING",
-    "TEST",
-    "UNKNOWN"
-}
-
-local function selectDeviceType(currentType)
-    local options = {}
-
-    for _, deviceType in ipairs(
-        deviceTypes
-    ) do
-        table.insert(
-            options,
-            {
-                label =
-                    deviceType
-                    .. (
-                        deviceType == currentType
-                        and "  [current]"
-                        or ""
-                    ),
-                value = deviceType
-            }
-        )
-    end
-
-    table.insert(
-        options,
-        {
-            label = "Cancel",
-            cancel = true
-        }
-    )
-
-    local selected =
-        chooseMenu(
-            "Select device type",
-            options,
-            getDevice()
-        )
-
-    if selected.cancel then
-        return nil
-    end
-
-    return selected.value
-end
-
-local function configureDevice()
-    transition(
-        "Opening device configuration..."
-    )
-
-    local module, moduleReason =
-        loadDeviceConfigModule()
-
-    if not module then
-        drawHeader(
-            "Configure this device"
-        )
-
-        setTextColour(THEME.error)
-        print(moduleReason)
-        resetColours()
-
-        print("")
-        print(
-            "Install or update MCNet first."
-        )
-
-        pause()
-        return
-    end
-
-    local current =
-        module.load(
-            DEVICE_CONFIG_PATH
-        )
-
-    if not current then
-        current =
-            module.createDefault()
-    end
-
-    local selectedType =
-        selectDeviceType(
-            current.type
-        )
-
-    if not selectedType then
-        return
-    end
-
-    drawHeader(
-        "Configure this device",
-        current
-    )
-
-    print(
-        "Enter the identity for this computer."
-    )
-
-    print(
-        "Press Enter to retain the current value."
-    )
-
-    print("")
-
-    local suggestedAddress =
-        current.address
-
-    if suggestedAddress == "UNKNOWN"
-        and selectedType ~= "UNKNOWN" then
-        suggestedAddress =
-            selectedType .. "-001"
-    end
-
-    local address =
-        readDefault(
-            "Address",
-            suggestedAddress
-        )
-
-    local name =
-        readDefault(
-            "Friendly name",
-            current.name
-        )
-
-    local region =
-        readDefault(
-            "Region",
-            current.region ~= "UNKNOWN"
-                and current.region
-                or "HOME"
-        )
-
-    local owner =
-        readDefault(
-            "Owner",
-            current.owner or "MCNet"
-        )
-
-    local status =
-        current.status
-
-    if status == "OFFLINE"
-        or status == "UNKNOWN" then
-        status = "ONLINE"
-    end
-
-    local proposed = {
-        address = address,
-        name = name,
-        type = selectedType,
-        region = region,
-        owner = owner,
-        status = status,
-        computerID =
-            os.getComputerID(),
-        version =
-            CONSOLE_VERSION
-    }
-
-    proposed =
-        module.normalise(
-            proposed
-        )
-
-    local valid, validReason =
-        module.validate(
-            proposed
-        )
-
-    if not valid then
-        print("")
-        setTextColour(THEME.error)
-        print(
-            "Configuration is invalid:"
-        )
-
-        print(tostring(validReason))
-        resetColours()
-
-        pause()
-        return
-    end
-
-    drawHeader(
-        "Confirm device configuration"
-    )
-
-    print(
-        "Address    : "
-        .. proposed.address
-    )
-
-    print(
-        "Name       : "
-        .. proposed.name
-    )
-
-    print(
-        "Type       : "
-        .. proposed.type
-    )
-
-    print(
-        "Region     : "
-        .. proposed.region
-    )
-
-    print(
-        "Owner      : "
-        .. proposed.owner
-    )
-
-    print(
-        "Status     : "
-        .. proposed.status
-    )
-
-    print(
-        "Computer ID: "
-        .. tostring(
-            proposed.computerID
-        )
-    )
-
-    print("")
-
-    if not askYesNo(
-        "Save this configuration?"
-    ) then
-        print("")
-        print(
-            "Configuration cancelled."
-        )
-
-        pause()
-        return
-    end
-
-    local saved, saveReason =
-        module.save(
-            proposed,
-            DEVICE_CONFIG_PATH
-        )
-
-    print("")
-
-    if saved then
-        setTextColour(THEME.success)
-        print(
-            "Device configured successfully."
-        )
-
-        resetColours()
-
-        print("")
-        print(
-            proposed.address
-            .. " is now online."
-        )
-    else
-        setTextColour(THEME.error)
-        print(
-            "Could not save configuration:"
-        )
-
-        print(tostring(saveReason))
-        resetColours()
-    end
-
-    pause()
-end
-
-local function showDeviceInformation()
-    transition(
-        "Reading device identity...",
-        0.3
-    )
-
-    local device =
-        getDevice()
-
-    drawHeader(
-        "Device information",
-        device
-    )
-
-    print(
-        "Friendly name : "
-        .. tostring(device.name)
-    )
-
-    print(
-        "MCNet address : "
-        .. tostring(device.address)
-    )
-
-    print(
-        "Device type   : "
-        .. tostring(device.type)
-    )
-
-    print(
-        "Region        : "
-        .. tostring(device.region)
-    )
-
-    print(
-        "Owner         : "
-        .. tostring(device.owner)
-    )
-
-    print(
-        "Status        : "
-        .. tostring(device.status)
-    )
-
-    print(
-        "Computer ID   : "
-        .. tostring(device.computerID)
-    )
-
-    print(
-        "MCNet version : "
-        .. tostring(device.version)
-    )
-
-    print(
-        "Protocol      : "
-        .. tostring(PROTOCOL_VERSION)
-    )
-
-    print("")
-
-    if device.address == "UNKNOWN" then
-        setTextColour(THEME.highlight)
-        print(
-            "This computer has not been configured."
-        )
-
-        resetColours()
-    else
-        setTextColour(THEME.success)
-        print(
-            "Device identity is configured."
-        )
-
-        resetColours()
-    end
-
-    pause()
-end
-
-local tests = {
-    {
-        label = "Packet protocol tests",
-        path =
-            "tests/communications/packet_test.lua"
-    },
-    {
-        label = "Modem driver tests",
-        path =
-            "tests/drivers/modem_test.lua"
-    },
-    {
-        label = "Device configuration tests",
-        path =
-            "tests/system/device_config_test.lua"
-    }
-}
-
-local function runTest(test)
-    transition(
-        "Loading " .. test.label .. "...",
-        0.3
-    )
-
-    clear()
-
-    centreAt(
-        1,
-        test.label,
-        THEME.title
-    )
-
-    centreAt(
-        2,
-        string.rep("=", #test.label),
-        THEME.accent
-    )
-
-    print("")
+    setText(colors.lime)
+    print("MCNet " .. tostring(manifest.version or "") .. " installed.")
     resetColours()
-
-    if not fs.exists(test.path) then
-        setTextColour(THEME.error)
-        print(
-            "Test file is not installed:"
-        )
-
-        print(test.path)
-        resetColours()
-        pause()
-        return
-    end
-
-    local completed =
-        shell.run(test.path)
-
     print("")
-
-    if completed then
-        setTextColour(THEME.success)
-        print(
-            "Test program completed."
-        )
-    else
-        setTextColour(THEME.error)
-        print(
-            "Test program returned an error."
-        )
-    end
-
-    resetColours()
-    pause()
+    print("Installed " .. tostring(#manifest.files) .. " files.")
+    print("The bootstrap will reboot this device.")
 end
 
-local function runAllTests()
-    for _, test in ipairs(tests) do
-        runTest(test)
-    end
-end
-
-local function testMenu()
-    while true do
-        local device =
-            getDevice()
-
-        local options = {
-            {
-                label = "Run packet protocol tests",
-                action = function()
-                    runTest(tests[1])
-                end
-            },
-            {
-                label = "Run modem driver tests",
-                action = function()
-                    runTest(tests[2])
-                end
-            },
-            {
-                label = "Run device configuration tests",
-                action = function()
-                    runTest(tests[3])
-                end
-            },
-            {
-                label = "Run all tests",
-                action = runAllTests
-            },
-            {
-                label = "Return to main menu",
-                back = true
-            }
-        }
-
-        local selected =
-            chooseMenu(
-                "Diagnostics",
-                options,
-                device
-            )
-
-        if selected.back then
-            return
-        end
-
-        selected.action()
-    end
-end
-
-local function systemInformation()
-    transition(
-        "Reading system information...",
-        0.3
-    )
-
-    local device =
-        getDevice()
-
-    drawHeader(
-        "System information",
-        device
-    )
-
-    local freeSpace =
-        fs.getFreeSpace("/")
-
-    print(
-        "Computer ID    : "
-        .. tostring(
-            os.getComputerID()
-        )
-    )
-
-    print(
-        "Computer label : "
-        .. tostring(
-            os.getComputerLabel()
-                or "None"
-        )
-    )
-
-    print(
-        "Console version: "
-        .. CONSOLE_VERSION
-    )
-
-    print(
-        "Packet protocol: "
-        .. tostring(
-            PROTOCOL_VERSION
-        )
-    )
-
-    print(
-        "Free space     : "
-        .. tostring(freeSpace)
-        .. " bytes"
-    )
-
-    print(
-        "Colour display : "
-        .. (
-            supportsColour
-            and "Yes"
-            or "No"
-        )
-    )
-
-    print(
-        "Device config  : "
-        .. (
-            fs.exists(
-                DEVICE_CONFIG_PATH
-            )
-            and "Present"
-            or "Missing"
-        )
-    )
-
-    pause()
-end
-
-local function main()
-    transition(
-        "Starting MCNet Console...",
-        0.65
-    )
-
-    while true do
-        local device =
-            getDevice()
-
-        local options = {
-            {
-                label =
-                    compactMode
-                    and "Install / update"
-                    or "Install or update MCNet",
-                action = function()
-                    local success, result =
-                        installMCNet()
-
-                    if success
-                        and result == "tests" then
-                        testMenu()
-                    end
-                end
-            },
-            {
-                label =
-                    compactMode
-                    and "Configure device"
-                    or "Configure this device",
-                action =
-                    configureDevice
-            },
-            {
-                label =
-                    compactMode
-                    and "View device"
-                    or "View device information",
-                action =
-                    showDeviceInformation
-            },
-            {
-                label =
-                    compactMode
-                    and "Diagnostics"
-                    or "Diagnostics and tests",
-                action =
-                    testMenu
-            },
-            {
-                label =
-                    compactMode
-                    and "System info"
-                    or "System information",
-                action =
-                    systemInformation
-            },
-            {
-                label = "Exit",
-                exit = true
-            }
-        }
-
-        local selected =
-            chooseMenu(
-                "Main menu",
-                options,
-                device
-            )
-
-        if selected.exit then
-            transition(
-                "Closing MCNet Console...",
-                0.3
-            )
-
-            clear()
-
-            centreAt(
-                3,
-                "MCNet Console",
-                THEME.title
-            )
-
-            centreAt(
-                5,
-                "Connection closed.",
-                THEME.muted
-            )
-
-            resetColours()
-            term.setCursorPos(
-                1,
-                screenHeight
-            )
-
-            print("")
-            return
-        end
-
-        selected.action()
-    end
-end
-
-local success, reason =
-    pcall(main)
-
+local completed, reason = pcall(install)
 resetColours()
 
-if not success then
+if not completed then
+    cleanStage()
     clear()
-
-    setTextColour(THEME.error)
-    print("MCNet Console encountered an error:")
+    setText(colors.red)
+    print("MCNet installation failed:")
     resetColours()
     print("")
     print(tostring(reason))
     print("")
+    error("Installation stopped", 0)
 end
