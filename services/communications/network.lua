@@ -102,13 +102,19 @@ function module.new(options)
 
     local function pruneMap(map, timeout)
         local currentTime = now()
+        local expiredKeys = {}
 
+        -- Lua 5.1 must not have keys removed while pairs() is iterating.
         for key, record in pairs(map) do
             local timestamp = type(record) == "table" and record.time or record
 
             if currentTime - (tonumber(timestamp) or 0) > timeout then
-                map[key] = nil
+                expiredKeys[#expiredKeys + 1] = key
             end
+        end
+
+        for _, key in ipairs(expiredKeys) do
+            map[key] = nil
         end
     end
 
@@ -198,11 +204,17 @@ function module.new(options)
         end
 
         local currentTime = now()
+        local expiredTowers = {}
 
+        -- Collect expired entries first; deleting during pairs() breaks Lua 5.1.
         for address, candidate in pairs(towerCandidates) do
             if currentTime - (candidate.lastSeen or 0) > config.towerTimeout then
-                towerCandidates[address] = nil
+                expiredTowers[#expiredTowers + 1] = address
             end
+        end
+
+        for _, address in ipairs(expiredTowers) do
+            towerCandidates[address] = nil
         end
 
         local preferred = tostring(config.preferredTower or "")
@@ -683,6 +695,7 @@ function module.new(options)
 
     local function maintainPending()
         local currentTime = now()
+        local failedItems = {}
 
         for packetId, item in pairs(pending) do
             local due =
@@ -691,16 +704,20 @@ function module.new(options)
 
             if due then
                 if item.attempts >= config.maxRetries then
-                    pending[packetId] = nil
-                    notifyDelivery(
-                        packetId,
-                        "FAILED",
-                        item.reason or "No acknowledgement received"
-                    )
+                    failedItems[#failedItems + 1] = {
+                        packetId = packetId,
+                        reason = item.reason or "No acknowledgement received"
+                    }
                 else
                     transmitPending(item)
                 end
             end
+        end
+
+        -- Remove failed packets after the pairs() traversal has finished.
+        for _, failed in ipairs(failedItems) do
+            pending[failed.packetId] = nil
+            notifyDelivery(failed.packetId, "FAILED", failed.reason)
         end
     end
 

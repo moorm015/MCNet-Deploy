@@ -191,22 +191,49 @@ function module.new(selfAddress, config)
     function routing.prune()
         local currentTime = now()
 
-        for neighbourAddress, record in pairs(neighbours) do
-            if currentTime - (record.lastSeen or 0) > config.neighbourTimeout then
-                neighbours[neighbourAddress] = nil
+        local function collectExpired(map, timestampField, timeout)
+            local expiredKeys = {}
+
+            for key, record in pairs(map) do
+                local timestamp = type(record) == "table"
+                    and record[timestampField]
+                    or 0
+
+                if currentTime - (tonumber(timestamp) or 0) > timeout then
+                    expiredKeys[#expiredKeys + 1] = key
+                end
             end
+
+            return expiredKeys
         end
 
-        for endpointAddress, record in pairs(localEndpoints) do
-            if currentTime - (record.lastSeen or 0) > config.endpointTimeout then
-                localEndpoints[endpointAddress] = nil
-            end
+        local expiredNeighbours = collectExpired(
+            neighbours,
+            "lastSeen",
+            config.neighbourTimeout
+        )
+        local expiredEndpoints = collectExpired(
+            localEndpoints,
+            "lastSeen",
+            config.endpointTimeout
+        )
+        local expiredTopology = collectExpired(
+            lsdb,
+            "receivedAt",
+            config.topologyTimeout
+        )
+
+        -- Lua 5.1 cannot safely delete keys during pairs() traversal.
+        for _, key in ipairs(expiredNeighbours) do
+            neighbours[key] = nil
         end
 
-        for origin, record in pairs(lsdb) do
-            if currentTime - (record.receivedAt or 0) > config.topologyTimeout then
-                lsdb[origin] = nil
-            end
+        for _, key in ipairs(expiredEndpoints) do
+            localEndpoints[key] = nil
+        end
+
+        for _, key in ipairs(expiredTopology) do
+            lsdb[key] = nil
         end
     end
 
