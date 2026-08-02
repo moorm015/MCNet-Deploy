@@ -51,16 +51,16 @@ function application.run(context)
                 end
             },
             {
-                label = "Exit to CraftOS",
-                compactLabel = "Exit",
-                exit = true
+                label = "Shut down device",
+                compactLabel = "Shut down",
+                action = function()
+                    ui.restoreNative()
+                    os.shutdown()
+                end
             }
         }
 
         local selected = menu.choose(ui, deviceModule.getDisplayName(device), options, device, context.version)
-        if selected.exit then
-            return
-        end
         selected.action()
     end
 end

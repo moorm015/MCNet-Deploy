@@ -9,6 +9,8 @@ function application.run(context)
     local deviceModule = context.deviceModule
     local appManager = context.appManager
     local settings = context.settings
+    local coreConfigModule = context.coreConfigModule
+    local coreConfig = context.coreConfig
     local VERSION = context.version
     local PROTOCOL = context.protocol
     local INSTALLER_LOCAL = ".mcnet-installer.lua"
@@ -233,8 +235,13 @@ function application.run(context)
             context.messaging.setDevice(proposed)
         end
 
+        if context.coreClient then
+            context.coreClient.setDevice(proposed)
+        end
+
         print("")
-        print(proposed.address .. " is now online.")
+        print(proposed.address .. " is now configured.")
+        print("Reboot to apply any device-role change.")
         ui.pause()
         ui.configure(settings)
     end
@@ -365,6 +372,46 @@ function application.run(context)
                     end
                 },
                 {
+                    label = "PDA idle shutdown: " .. (settings.pdaIdleEnabled and "On" or "Off"),
+                    compactLabel = "PDA idle: " .. (settings.pdaIdleEnabled and "On" or "Off"),
+                    description = "Automatically power off an unused PDA.",
+                    action = function()
+                        toggleSetting("pdaIdleEnabled")
+                    end
+                },
+                {
+                    label = "PDA idle time: " .. tostring(settings.pdaIdleShutdown) .. " seconds",
+                    compactLabel = "Idle: " .. tostring(settings.pdaIdleShutdown) .. "s",
+                    description = "Choose the PDA inactivity timeout. Reboot applies it.",
+                    action = function()
+                        local value = chooseValue("PDA idle shutdown", { 60, 300, 600, 900, 1800, 0 }, settings.pdaIdleShutdown)
+                        if value ~= nil then
+                            settings.pdaIdleShutdown = value
+                            saveSettings()
+                        end
+                    end
+                },
+                {
+                    label = "Core server: " .. tostring(coreConfig and coreConfig.coreAddress or "SRV-001"),
+                    compactLabel = "Core: " .. tostring(coreConfig and coreConfig.coreAddress or "SRV-001"),
+                    description = "Set the central directory and mailbox address. Reboot applies it.",
+                    action = function()
+                        ui.restoreNative()
+                        ui.drawHeader("Core server address", getDevice(), VERSION)
+                        print("")
+                        local value = ui.readDefault("Address", coreConfig and coreConfig.coreAddress or "SRV-001")
+                        value = string.upper(tostring(value or ""))
+                        if value ~= "" and coreConfigModule then
+                            coreConfig.coreAddress = value
+                            local saved, reason = coreConfigModule.save(coreConfig)
+                            print("")
+                            print(saved and "Core address saved. Reboot to apply." or tostring(reason))
+                            ui.pause()
+                        end
+                        ui.configure(settings)
+                    end
+                },
+                {
                     label = "Reset console settings",
                     compactLabel = "Reset settings",
                     description = "Restore all UI settings to their defaults.",
@@ -444,6 +491,21 @@ function application.run(context)
             label = "End-to-end mesh tests",
             compactLabel = "Mesh tests",
             path = "tests/communications/mesh_test.lua"
+        },
+        {
+            label = "Core directory and mailbox tests",
+            compactLabel = "Core tests",
+            path = "tests/communications/core_services_test.lua"
+        },
+        {
+            label = "Contact book tests",
+            compactLabel = "Contacts tests",
+            path = "tests/communications/contacts_test.lua"
+        },
+        {
+            label = "Display configuration tests",
+            compactLabel = "Display tests",
+            path = "tests/system/display_config_test.lua"
         }
     }
 
@@ -915,6 +977,28 @@ function application.run(context)
         ui.pause()
     end
 
+    local function showCoreStatus()
+        local start = ui.drawHeader("Core services", getDevice(), VERSION)
+        if context.coreServer then
+            local data = context.coreServer.getSnapshot()
+            ui.printField("Role", "CORE SERVER", start)
+            ui.printField("Devices online", tostring(data.totals.devicesOnline or 0) .. "/" .. tostring(data.totals.devices or 0), start + 1)
+            ui.printField("Towers online", tostring(data.totals.towersOnline or 0) .. "/" .. tostring(data.totals.towers or 0), start + 2)
+            ui.printField("Mailbox pending", data.mailbox.pending or 0, start + 3)
+            ui.printField("Delivered", data.stats.mailboxDelivered or 0, start + 4)
+        elseif context.coreClient then
+            local status = context.coreClient.getStatus()
+            ui.printField("Core address", status.coreAddress, start)
+            ui.printField("Core status", status.online and "ONLINE" or "OFFLINE", start + 1)
+            ui.printField("Directory devices", status.devices, start + 2)
+            ui.printField("Known towers", status.towers, start + 3)
+            ui.printField("Cache file", context.coreClient.getCachePath(), start + 4)
+        else
+            ui.writeAt(ui.getLayout().left, start, "Core services are unavailable.", ui.getPalette().warning)
+        end
+        ui.pause()
+    end
+
     local function networkPage()
         while true do
             local status =
@@ -958,6 +1042,12 @@ function application.run(context)
                     description =
                         "Show destinations learned from tower link-state data.",
                     action = showDestinations
+                },
+                {
+                    label = "Core directory and mailbox",
+                    compactLabel = "Core services",
+                    description = "Show SRV-001, directory and mailbox state.",
+                    action = showCoreStatus
                 },
                 {
                     label = "Message storage",
@@ -1076,19 +1166,25 @@ function application.run(context)
                 end
             },
             {
-                label = "Exit MCNet",
-                compactLabel = "Exit",
-                description = "Return to the CraftOS shell.",
-                exit = true
+                label = context.fromRole == true and "Return to device application" or "Shut down device",
+                compactLabel = context.fromRole == true and "Return" or "Shut down",
+                description = context.fromRole == true
+                    and "Return without exposing the CraftOS shell."
+                    or "Power off this computer safely.",
+                back = context.fromRole == true,
+                action = context.fromRole == true and nil or function()
+                    ui.drawHeader("Shut down", device, VERSION)
+                    print("")
+                    if ui.askYesNo("Shut down this device?") then
+                        ui.restoreNative()
+                        os.shutdown()
+                    end
+                end
             }
         }
 
         local selected = menu.choose(ui, "System console", options, device, VERSION)
-        if selected.exit then
-            ui.restoreNative()
-            term.clear()
-            term.setCursorPos(1, 1)
-            print("MCNet Console closed.")
+        if selected.back then
             return
         end
         selected.action()
