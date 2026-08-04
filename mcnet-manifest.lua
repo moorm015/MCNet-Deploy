@@ -1,6 +1,6 @@
 return {
     name = "MCNet",
-    version = "0.9.0",
+    version = "0.9.1",
     protocol = 1,
     entrypoint = "kernel/boot.lua",
 
@@ -39,6 +39,9 @@ return {
         { source = "services/communications/contacts.lua", destination = "services/communications/contacts.lua" },
         { source = "services/communications/messaging.lua", destination = "services/communications/messaging.lua" },
 
+        -- NEW
+        { source = "services/archive/archive_manager.lua", destination = "services/archive/archive_manager.lua" },
+
         { source = "drivers/modem.lua", destination = "drivers/modem.lua" },
 
         { source = "applications/system/console.lua", destination = "applications/system/console.lua" },
@@ -48,6 +51,9 @@ return {
         { source = "applications/roles/tower.lua", destination = "applications/roles/tower.lua" },
         { source = "applications/roles/server.lua", destination = "applications/roles/server.lua" },
         { source = "applications/roles/display.lua", destination = "applications/roles/display.lua" },
+
+        -- NEW
+        { source = "applications/roles/archive_reader.lua", destination = "applications/roles/archive_reader.lua" },
 
         { source = "tests/communications/packet_test.lua", destination = "tests/communications/packet_test.lua" },
         { source = "tests/communications/frame_test.lua", destination = "tests/communications/frame_test.lua" },

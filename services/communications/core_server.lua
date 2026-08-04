@@ -1,5 +1,5 @@
 -- MCNet core server: directory, presence, tower registry and mailbox
--- Version 0.9.0
+-- Version 0.9.1
 
 local module = {}
 local STORE_PATH = ".mcnet/core_server.lua"
@@ -463,6 +463,282 @@ function module.new(network, initialDevice, config, path)
                 timer = os.startTimer(1)
             end
         end
+    end
+
+
+    -- Prepare a read-only archive bundle.
+    --
+    -- This does not modify the live store. It selects older delivered
+    -- messages and older events while retaining recent records locally.
+    --
+    -- The returned token must be supplied to commitArchive() only after the
+    -- archive manager has written and verified the archive disk.
+    function server.prepareArchive(options)
+        options = type(options) == "table" and options or {}
+
+        local retainDelivered =
+            math.max(
+                0,
+                math.floor(
+                    tonumber(options.retainDelivered)
+                    or tonumber(settings.archiveRetainDelivered)
+                    or 50
+                )
+            )
+
+        local retainEvents =
+            math.max(
+                0,
+                math.floor(
+                    tonumber(options.retainEvents)
+                    or tonumber(settings.archiveRetainEvents)
+                    or 200
+                )
+            )
+
+        local delivered = {}
+
+        for messageId, item in pairs(store.mailbox) do
+            if item.state == "DELIVERED" then
+                delivered[#delivered + 1] = {
+                    id = messageId,
+                    day = tonumber(item.deliveredDay or item.createdDay) or 0,
+                    time = tonumber(item.deliveredTime or item.createdTime) or 0
+                }
+            end
+        end
+
+        table.sort(
+            delivered,
+            function(left, right)
+                if left.day == right.day then
+                    if left.time == right.time then
+                        return tostring(left.id) < tostring(right.id)
+                    end
+
+                    return left.time < right.time
+                end
+
+                return left.day < right.day
+            end
+        )
+
+        local archiveMessageCount =
+            math.max(
+                0,
+                #delivered - retainDelivered
+            )
+
+        local archiveMessages = {}
+        local archiveMessageIds = {}
+
+        for index = 1, archiveMessageCount do
+            local messageId = delivered[index].id
+            local item = store.mailbox[messageId]
+
+            if item and item.state == "DELIVERED" then
+                archiveMessages[messageId] =
+                    deepCopy(item)
+
+                archiveMessageIds[#archiveMessageIds + 1] =
+                    messageId
+            end
+        end
+
+        local archiveEventCount =
+            math.max(
+                0,
+                #store.events - retainEvents
+            )
+
+        local archiveEvents = {}
+
+        for index = 1, archiveEventCount do
+            archiveEvents[index] =
+                deepCopy(store.events[index])
+        end
+
+        local bundle = {
+            messages = archiveMessages,
+            events = archiveEvents,
+            devices = deepCopy(store.devices),
+            towers = deepCopy(store.towers),
+            stats = deepCopy(store.stats),
+            generatedBy = device.address,
+            generatedDay = os.day and os.day() or 0,
+            generatedTime = os.time and os.time() or 0
+        }
+
+        local token = {
+            format = 1,
+            storePath = storePath,
+            createdClock = now(),
+            createdDay = os.day and os.day() or 0,
+            createdTime = os.time and os.time() or 0,
+            messageIds = deepCopy(archiveMessageIds),
+            events = deepCopy(archiveEvents),
+            retainDelivered = retainDelivered,
+            retainEvents = retainEvents
+        }
+
+        return true, bundle, token
+    end
+
+    local function archiveEventsStillMatch(expected)
+        if type(expected) ~= "table" then
+            return false
+        end
+
+        if #store.events < #expected then
+            return false
+        end
+
+        for index, archived in ipairs(expected) do
+            local current = store.events[index]
+
+            if type(current) ~= "table" then
+                return false
+            end
+
+            if tostring(current.kind or "") ~=
+                    tostring(archived.kind or "")
+                or tostring(current.message or "") ~=
+                    tostring(archived.message or "")
+                or tostring(current.source or "") ~=
+                    tostring(archived.source or "")
+                or tonumber(current.day or 0) ~=
+                    tonumber(archived.day or 0)
+                or tonumber(current.time or 0) ~=
+                    tonumber(archived.time or 0) then
+
+                return false
+            end
+        end
+
+        return true
+    end
+
+    -- Commit an archive after the archive manager has successfully written
+    -- and verified a disk.
+    --
+    -- Only records described by the token are pruned. Pending, sending and
+    -- failed mailbox records are never removed here.
+    function server.commitArchive(token, archiveMetadata)
+        if type(token) ~= "table" then
+            return false, "Archive token is invalid"
+        end
+
+        if type(token.messageIds) ~= "table"
+            or type(token.events) ~= "table" then
+
+            return false, "Archive token is incomplete"
+        end
+
+        if token.storePath
+            and token.storePath ~= storePath then
+
+            return false,
+                "Archive token belongs to another store"
+        end
+
+        if not archiveEventsStillMatch(token.events) then
+            return false,
+                "Live event history changed before archive commit"
+        end
+
+        local removedMessages = 0
+
+        for _, messageId in ipairs(token.messageIds) do
+            local item = store.mailbox[messageId]
+
+            if item and item.state == "DELIVERED" then
+                store.mailbox[messageId] = nil
+                removedMessages =
+                    removedMessages + 1
+            end
+        end
+
+        local removedEvents =
+            #token.events
+
+        for _ = 1, removedEvents do
+            table.remove(store.events, 1)
+        end
+
+        local archiveId =
+            type(archiveMetadata) == "table"
+            and archiveMetadata.archiveId
+            or "UNKNOWN"
+
+        recordEvent(
+            "ARCHIVE",
+            "Committed "
+                .. tostring(archiveId)
+                .. ": "
+                .. tostring(removedMessages)
+                .. " messages, "
+                .. tostring(removedEvents)
+                .. " events",
+            device.address
+        )
+
+        local saved, reason =
+            saveStore(store, storePath)
+
+        if not saved then
+            return false,
+                "Archive records were selected but the live store could not be saved: "
+                .. tostring(reason)
+        end
+
+        lastSave = now()
+
+        return true, {
+            archiveId = archiveId,
+            messagesRemoved = removedMessages,
+            eventsRemoved = removedEvents,
+            messagesRemaining = (function()
+                local count = 0
+                for _ in pairs(store.mailbox) do
+                    count = count + 1
+                end
+                return count
+            end)(),
+            eventsRemaining = #store.events
+        }
+    end
+
+    function server.getArchiveSummary(options)
+        local prepared,
+            bundle,
+            token =
+            server.prepareArchive(options)
+
+        if not prepared then
+            return {
+                ready = false,
+                reason = bundle
+            }
+        end
+
+        local messageCount = 0
+
+        for _ in pairs(bundle.messages or {}) do
+            messageCount = messageCount + 1
+        end
+
+        return {
+            ready =
+                messageCount > 0
+                or #(bundle.events or {}) > 0,
+
+            messages = messageCount,
+            events = #(bundle.events or {}),
+            retainDelivered =
+                token.retainDelivered,
+            retainEvents =
+                token.retainEvents
+        }
     end
 
     function server.stop() running = false end
