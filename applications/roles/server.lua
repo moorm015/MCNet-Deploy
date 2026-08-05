@@ -209,7 +209,13 @@ function application.run(context)
 
                     warningLevel = 0.80,
                     requiredLevel = 0.90,
-                    archiveLevel = 0.95
+                    archiveLevel = 0.95,
+
+                    mcnetVersion =
+                        context.version,
+
+                    protocol =
+                        context.protocol
                 }
             )
 
@@ -764,6 +770,27 @@ function application.run(context)
             start + 9
         )
 
+        if type(status.lastArchive)
+            == "table" then
+
+            ui.printField(
+                "Last archive",
+                tostring(
+                    status.lastArchive.archiveId
+                    or "UNKNOWN"
+                ),
+                start + 10
+            )
+
+            ui.printField(
+                "Last size",
+                formatBytes(
+                    status.lastArchive.totalBytes
+                ),
+                start + 11
+            )
+        end
+
         print("")
         print(
             archiveActionText(
@@ -1096,6 +1123,29 @@ function application.run(context)
             )
         )
 
+        local manifest =
+            type(archiveMetadata.manifest)
+                == "table"
+            and archiveMetadata.manifest
+            or nil
+
+        if manifest then
+            print(
+                "Manifest: VERIFIED"
+            )
+
+            print(
+                "Archive size: "
+                .. formatBytes(
+                    manifest.totalBytes
+                )
+            )
+        else
+            print(
+                "Manifest: LEGACY / NONE"
+            )
+        end
+
         print("")
         print(
             "Committing archived records..."
@@ -1140,6 +1190,31 @@ function application.run(context)
 
         print("")
         print("Archive complete.")
+
+        print(
+            "MCNet: "
+            .. tostring(
+                archiveMetadata.mcnetVersion
+                or context.version
+                or "UNKNOWN"
+            )
+            .. " protocol "
+            .. tostring(
+                archiveMetadata.protocol
+                or context.protocol
+                or "UNKNOWN"
+            )
+        )
+
+        if manifest then
+            print(
+                "Size: "
+                .. formatBytes(
+                    manifest.totalBytes
+                )
+            )
+        end
+
         print(
             "Messages removed: "
             .. tostring(

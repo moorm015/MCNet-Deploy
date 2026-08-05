@@ -1,5 +1,8 @@
 -- MCNet core server: directory, presence, tower registry and mailbox
 -- Version 0.9.1
+--
+-- Archive-safe storage: delivered messages and events are never silently
+-- discarded before the verified archive commit removes them.
 
 local module = {}
 local STORE_PATH = ".mcnet/core_server.lua"
@@ -107,11 +110,17 @@ function module.new(network, initialDevice, config, path)
 
     local function recordEvent(kind, message, source)
         local day, time = stamp()
+
         store.events[#store.events + 1] = {
-            day = day, time = time, kind = tostring(kind or "INFO"),
-            message = tostring(message or ""), source = source
+            day = day,
+            time = time,
+            kind = tostring(kind or "INFO"),
+            message = tostring(message or ""),
+            source = source
         }
-        safeTrim(store.events, settings.maxEvents or 300)
+
+        -- Do not trim live events here. Older events are removed only by
+        -- commitArchive() after a disk has been written and verified.
     end
 
     local function save(force)
@@ -270,14 +279,25 @@ function module.new(network, initialDevice, config, path)
         if not item then
             local mailboxCount = 0
             for _ in pairs(store.mailbox) do mailboxCount = mailboxCount + 1 end
-            local maximum = settings.maxMailbox or 500
+            local maximum =
+                settings.maxMailbox
+                or 500
+
             if mailboxCount >= maximum then
-                local needed = mailboxCount - maximum + 1
-                mailboxCount = mailboxCount - removeOldestDelivered(needed)
-            end
-            if mailboxCount >= maximum then
-                sendMailboxState(packet.source, messageId, "FAILED", "Core mailbox is full")
-                recordEvent("MAIL", "Rejected message because the mailbox is full", packet.source)
+                sendMailboxState(
+                    packet.source,
+                    messageId,
+                    "FAILED",
+                    "Core mailbox is full; create an archive disk"
+                )
+
+                recordEvent(
+                    "MAIL",
+                    "Rejected message because the mailbox is full; archive required",
+                    packet.source
+                )
+
+                save(true)
                 return
             end
 
@@ -646,6 +666,12 @@ function module.new(network, initialDevice, config, path)
                 "Live event history changed before archive commit"
         end
 
+        local mailboxBefore =
+            deepCopy(store.mailbox)
+
+        local eventsBefore =
+            deepCopy(store.events)
+
         local removedMessages = 0
 
         for _, messageId in ipairs(token.messageIds) do
@@ -686,8 +712,16 @@ function module.new(network, initialDevice, config, path)
             saveStore(store, storePath)
 
         if not saved then
+            -- Restore the exact pre-commit state. The verified archive disk
+            -- remains valid, but no live records are considered pruned.
+            store.mailbox =
+                mailboxBefore
+
+            store.events =
+                eventsBefore
+
             return false,
-                "Archive records were selected but the live store could not be saved: "
+                "Archive disk is verified, but the live store could not be saved; no records were pruned: "
                 .. tostring(reason)
         end
 

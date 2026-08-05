@@ -2,10 +2,10 @@
 -- Version 0.9.1
 --
 -- Detects a disk drive, monitors internal storage and writes verified,
--- self-contained archive disks.
+-- self-contained archive disks with a machine-readable manifest.
 --
--- This module never deletes live Core Server records. Safe pruning will be
--- connected separately after archive writing and verification are tested.
+-- This module never deletes live Core Server records. The Core Server
+-- performs pruning only after this module has written and verified the disk.
 
 local module = {}
 
@@ -18,6 +18,7 @@ local DEFAULT_REQUIRED_LEVEL = 0.90
 local DEFAULT_ARCHIVE_LEVEL = 0.95
 
 local ARCHIVE_FORMAT = 1
+local MANIFEST_FORMAT = 1
 
 local function deepCopy(value, seen)
     if type(value) ~= "table" then
@@ -502,6 +503,17 @@ function module.new(config)
             or "SRV-001"
         )
 
+    local mcnetVersion =
+        tostring(
+            config.mcnetVersion
+            or "0.9.1"
+        )
+
+    local protocolVersion =
+        tonumber(
+            config.protocol
+        ) or 1
+
     local state = loadState(statePath)
     local lastStatus = nil
 
@@ -522,6 +534,7 @@ function module.new(config)
             archivePath = nil,
             archiveState = "NO_DRIVE",
             archiveMetadata = nil,
+            archiveManifest = nil,
             writable = false,
             freeSpace = nil,
             reason = nil
@@ -694,13 +707,141 @@ function module.new(config)
 
         result.archiveMetadata = metadata
 
-        if metadata.complete == true then
-            result.archiveState =
-                "COMPLETE_REMOVE"
-        else
+        if metadata.complete ~= true
+            or metadata.verified ~= true then
+
             result.archiveState =
                 "INCOMPLETE"
+
+            result.reason =
+                "Archive metadata is incomplete"
+
+            return result
         end
+
+        local manifestPath =
+            combine(
+                result.archivePath,
+                "manifest.lua"
+            )
+
+        -- Archives created before manifest support remain recognisable as
+        -- completed legacy disks. New archives are checked against every
+        -- payload file listed in their manifest.
+        if not fs.exists(manifestPath) then
+            result.archiveState =
+                "COMPLETE_REMOVE"
+
+            result.reason =
+                "Legacy archive without manifest"
+
+            return result
+        end
+
+        if fs.isDir(manifestPath) then
+            result.archiveState =
+                "INVALID"
+
+            result.reason =
+                "Archive manifest path is invalid"
+
+            return result
+        end
+
+        local manifestLoaded,
+            manifest =
+            readLuaFile(manifestPath)
+
+        if not manifestLoaded
+            or type(manifest) ~= "table" then
+
+            result.archiveState =
+                "INVALID"
+
+            result.reason =
+                "Archive manifest is invalid"
+
+            return result
+        end
+
+        result.archiveManifest =
+            manifest
+
+        if manifest.complete ~= true
+            or manifest.verified ~= true then
+
+            result.archiveState =
+                "INCOMPLETE"
+
+            result.reason =
+                "Archive manifest is incomplete"
+
+            return result
+        end
+
+        if tostring(manifest.archiveId or "")
+            ~= tostring(metadata.archiveId or "") then
+
+            result.archiveState =
+                "INVALID"
+
+            result.reason =
+                "Archive and manifest IDs do not match"
+
+            return result
+        end
+
+        if tonumber(manifest.archiveFormat or 0)
+            ~= tonumber(metadata.format or 0) then
+
+            result.archiveState =
+                "INVALID"
+
+            result.reason =
+                "Archive format does not match manifest"
+
+            return result
+        end
+
+        for _, entry in ipairs(
+            manifest.files or {}
+        ) do
+            local path =
+                combine(
+                    result.archivePath,
+                    entry.name
+                )
+
+            if not fs.exists(path)
+                or fs.isDir(path) then
+
+                result.archiveState =
+                    "INVALID"
+
+                result.reason =
+                    "Manifest file is missing: "
+                    .. tostring(entry.name)
+
+                return result
+            end
+
+            if tonumber(entry.bytes)
+                and tonumber(fs.getSize(path))
+                    ~= tonumber(entry.bytes) then
+
+                result.archiveState =
+                    "INVALID"
+
+                result.reason =
+                    "Manifest size mismatch: "
+                    .. tostring(entry.name)
+
+                return result
+            end
+        end
+
+        result.archiveState =
+            "COMPLETE_REMOVE"
 
         return result
     end
@@ -956,8 +1097,11 @@ function module.new(config)
 
         local metadata = {
             format = ARCHIVE_FORMAT,
+            manifestFormat = MANIFEST_FORMAT,
             archiveId = archiveId,
             server = serverAddress,
+            mcnetVersion = mcnetVersion,
+            protocol = protocolVersion,
             createdDay = created.day,
             createdTime = created.time,
 
@@ -987,39 +1131,111 @@ function module.new(config)
             verified = false
         }
 
+        local payloadFiles = {
+            {
+                name = "messages.lua",
+                value = messages,
+                records = metadata.messageCount,
+                kind = "messages"
+            },
+            {
+                name = "events.lua",
+                value = events,
+                records = metadata.eventCount,
+                kind = "events"
+            },
+            {
+                name = "directory.lua",
+                value = devices,
+                records = metadata.deviceCount,
+                kind = "devices"
+            },
+            {
+                name = "towers.lua",
+                value = towers,
+                records = metadata.towerCount,
+                kind = "towers"
+            }
+        }
+
+        local manifest = {
+            format = MANIFEST_FORMAT,
+            archiveFormat = ARCHIVE_FORMAT,
+            archiveId = archiveId,
+            server = serverAddress,
+            mcnetVersion = mcnetVersion,
+            protocol = protocolVersion,
+            createdDay = created.day,
+            createdTime = created.time,
+            files = {},
+            payloadBytes = 0,
+            totalBytes = 0,
+            complete = false,
+            verified = false
+        }
+
+        for _, entry in ipairs(payloadFiles) do
+            local bytes =
+                #serialiseValue(entry.value)
+
+            manifest.files[#manifest.files + 1] = {
+                name = entry.name,
+                kind = entry.kind,
+                records = entry.records,
+                bytes = bytes,
+                required = true
+            }
+
+            manifest.payloadBytes =
+                manifest.payloadBytes + bytes
+        end
+
+        local function calculateTotalBytes()
+            local previous = -1
+            local total = 0
+
+            for _ = 1, 6 do
+                local archiveBytes =
+                    #serialiseValue(metadata)
+
+                local manifestBytes =
+                    #serialiseValue(manifest)
+
+                total =
+                    manifest.payloadBytes
+                    + archiveBytes
+                    + manifestBytes
+
+                if total == previous then
+                    break
+                end
+
+                previous = total
+                manifest.totalBytes = total
+            end
+
+            manifest.totalBytes = total
+            return total
+        end
+
+        local requiredBytes =
+            calculateTotalBytes()
+            + 4096
+
         local files = {
             {
                 name = "archive.lua",
                 value = metadata
             },
             {
-                name = "messages.lua",
-                value = messages
-            },
-            {
-                name = "events.lua",
-                value = events
-            },
-            {
-                name = "directory.lua",
-                value = devices
-            },
-            {
-                name = "towers.lua",
-                value = towers
+                name = "manifest.lua",
+                value = manifest
             }
         }
 
-        local requiredBytes = 0
-
-        for _, entry in ipairs(files) do
-            requiredBytes =
-                requiredBytes
-                + #serialiseValue(entry.value)
+        for _, entry in ipairs(payloadFiles) do
+            files[#files + 1] = entry
         end
-
-        requiredBytes =
-            requiredBytes + 4096
 
         if type(diskInfo.freeSpace) ==
                 "number"
@@ -1057,6 +1273,7 @@ function module.new(config)
 
         local requiredFiles = {
             "archive.lua",
+            "manifest.lua",
             "messages.lua",
             "events.lua",
             "directory.lua",
@@ -1069,10 +1286,12 @@ function module.new(config)
             local path =
                 combine(stagingPath, name)
 
-            local loaded =
+            local loaded, value =
                 readLuaFile(path)
 
-            if not loaded then
+            if not loaded
+                or type(value) ~= "table" then
+
                 fs.delete(stagingPath)
 
                 return false,
@@ -1081,8 +1300,44 @@ function module.new(config)
             end
         end
 
+        for _, entry in ipairs(
+            manifest.files
+        ) do
+            local path =
+                combine(
+                    stagingPath,
+                    entry.name
+                )
+
+            if not fs.exists(path)
+                or fs.isDir(path) then
+
+                fs.delete(stagingPath)
+
+                return false,
+                    "Manifest file is missing: "
+                    .. tostring(entry.name)
+            end
+
+            local actualBytes =
+                tonumber(
+                    fs.getSize(path)
+                ) or -1
+
+            if actualBytes ~= entry.bytes then
+                fs.delete(stagingPath)
+
+                return false,
+                    "Manifest size check failed for "
+                    .. tostring(entry.name)
+            end
+        end
+
         metadata.complete = true
         metadata.verified = true
+        manifest.complete = true
+        manifest.verified = true
+        calculateTotalBytes()
 
         local metadataWritten,
             metadataReason =
@@ -1102,6 +1357,24 @@ function module.new(config)
                 .. tostring(metadataReason)
         end
 
+        local manifestWritten,
+            manifestReason =
+            writeAtomicLuaFile(
+                combine(
+                    stagingPath,
+                    "manifest.lua"
+                ),
+                manifest
+            )
+
+        if not manifestWritten then
+            fs.delete(stagingPath)
+
+            return false,
+                "Could not finalise archive manifest: "
+                .. tostring(manifestReason)
+        end
+
         fs.move(
             stagingPath,
             archivePath
@@ -1116,10 +1389,26 @@ function module.new(config)
                 )
             )
 
+        local finalManifestLoaded,
+            finalManifest =
+            readLuaFile(
+                combine(
+                    archivePath,
+                    "manifest.lua"
+                )
+            )
+
         if not finalMetadataLoaded
             or type(finalMetadata) ~= "table"
             or finalMetadata.complete ~= true
+            or finalMetadata.verified ~= true
             or finalMetadata.archiveId ~=
+                archiveId
+            or not finalManifestLoaded
+            or type(finalManifest) ~= "table"
+            or finalManifest.complete ~= true
+            or finalManifest.verified ~= true
+            or finalManifest.archiveId ~=
                 archiveId then
 
             return false,
@@ -1138,6 +1427,10 @@ function module.new(config)
             archiveId = archiveId,
             createdDay = created.day,
             createdTime = created.time,
+            mcnetVersion = mcnetVersion,
+            protocol = protocolVersion,
+            totalBytes =
+                manifest.totalBytes,
             messageCount =
                 metadata.messageCount,
             eventCount =
@@ -1161,8 +1454,14 @@ function module.new(config)
 
         manager.refresh()
 
-        return true,
+        local result =
             deepCopy(finalMetadata)
+
+        result.manifest =
+            deepCopy(finalManifest)
+
+        return true,
+            result
     end
 
     function manager.verifyInsertedArchive()
@@ -1181,6 +1480,7 @@ function module.new(config)
 
         local requiredFiles = {
             "archive.lua",
+            "manifest.lua",
             "messages.lua",
             "events.lua",
             "directory.lua",
@@ -1207,10 +1507,62 @@ function module.new(config)
             end
         end
 
-        return true,
+        local manifest =
+            diskInfo.archiveManifest
+
+        local manifestLoaded =
+            type(manifest) == "table"
+
+        if not manifestLoaded then
+            manifestLoaded,
+                manifest =
+                readLuaFile(
+                    combine(
+                        archivePath,
+                        "manifest.lua"
+                    )
+                )
+        end
+
+        if not manifestLoaded
+            or type(manifest) ~= "table"
+            or manifest.complete ~= true
+            or manifest.verified ~= true then
+
+            return false,
+                "Archive manifest failed verification"
+        end
+
+        for _, entry in ipairs(
+            manifest.files or {}
+        ) do
+            local path =
+                combine(
+                    archivePath,
+                    entry.name
+                )
+
+            if not fs.exists(path)
+                or fs.isDir(path)
+                or tonumber(fs.getSize(path))
+                    ~= tonumber(entry.bytes) then
+
+                return false,
+                    "Archive manifest mismatch: "
+                    .. tostring(entry.name)
+            end
+        end
+
+        local result =
             deepCopy(
                 diskInfo.archiveMetadata
             )
+
+        result.manifest =
+            deepCopy(manifest)
+
+        return true,
+            result
     end
 
     function manager.ejectDisk()

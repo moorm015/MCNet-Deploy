@@ -85,6 +85,32 @@ local function safeText(value)
     return tostring(value or "")
 end
 
+local function formatBytes(value)
+    value = tonumber(value)
+
+    if not value then
+        return "UNKNOWN"
+    end
+
+    if value < 1024 then
+        return tostring(
+            math.floor(value)
+        ) .. " B"
+    end
+
+    if value < 1024 * 1024 then
+        return string.format(
+            "%.1f KB",
+            value / 1024
+        )
+    end
+
+    return string.format(
+        "%.2f MB",
+        value / (1024 * 1024)
+    )
+end
+
 local function trimText(value, maximum)
     local text = safeText(value)
     maximum = math.max(
@@ -144,6 +170,11 @@ local function normaliseArchive(value)
         and value.towers
         or {}
 
+    value.manifest =
+        type(value.manifest) == "table"
+        and value.manifest
+        or nil
+
     return value
 end
 
@@ -157,6 +188,99 @@ local function countTable(value)
     end
 
     return count
+end
+
+local function archiveCounts(archive)
+    archive =
+        type(archive) == "table"
+        and archive
+        or {}
+
+    return {
+        messages =
+            countTable(
+                archive.messages
+            ),
+
+        events =
+            #(archive.events or {}),
+
+        devices =
+            countTable(
+                archive.devices
+            ),
+
+        towers =
+            countTable(
+                archive.towers
+            )
+    }
+end
+
+local function verifyManifest(
+    archivePath,
+    metadata,
+    manifest
+)
+    if type(manifest) ~= "table" then
+        return true, "LEGACY"
+    end
+
+    if manifest.complete ~= true
+        or manifest.verified ~= true then
+
+        return false,
+            "Archive manifest is incomplete"
+    end
+
+    if tostring(manifest.archiveId or "")
+        ~= tostring(metadata.archiveId or "") then
+
+        return false,
+            "Archive manifest ID does not match metadata"
+    end
+
+    if tonumber(manifest.archiveFormat or 0)
+        ~= tonumber(metadata.format or 0) then
+
+        return false,
+            "Archive format does not match manifest"
+    end
+
+    for _, entry in ipairs(
+        manifest.files or {}
+    ) do
+        local path =
+            combine(
+                archivePath,
+                entry.name
+            )
+
+        if not fs.exists(path)
+            or fs.isDir(path) then
+
+            return false,
+                "Manifest file is missing: "
+                .. safeText(entry.name)
+        end
+
+        if tonumber(entry.bytes) then
+            local actualBytes =
+                tonumber(
+                    fs.getSize(path)
+                )
+
+            if actualBytes
+                ~= tonumber(entry.bytes) then
+
+                return false,
+                    "Manifest size mismatch: "
+                    .. safeText(entry.name)
+            end
+        end
+    end
+
+    return true, "VERIFIED"
 end
 
 local function sortedValues(map, sorter)
@@ -353,6 +477,47 @@ function application.run(context)
             return false
         end
 
+        local manifest = nil
+        local manifestPath =
+            combine(
+                archivePath,
+                "manifest.lua"
+            )
+
+        if fs.exists(manifestPath)
+            and not fs.isDir(manifestPath) then
+
+            local manifestOkay,
+                loadedManifest =
+                readLuaFile(manifestPath)
+
+            if not manifestOkay then
+                archiveError =
+                    "Archive manifest could not be read: "
+                    .. tostring(loadedManifest)
+
+                return false
+            end
+
+            manifest =
+                loadedManifest
+
+            local manifestValid,
+                manifestReason =
+                verifyManifest(
+                    archivePath,
+                    metadata,
+                    manifest
+                )
+
+            if not manifestValid then
+                archiveError =
+                    tostring(manifestReason)
+
+                return false
+            end
+        end
+
         local messagesOkay,
             messages =
             readLuaFile(
@@ -424,6 +589,7 @@ function application.run(context)
         archive =
             normaliseArchive({
                 metadata = metadata,
+                manifest = manifest,
                 messages = messages,
                 events = events,
                 devices = devices,
@@ -541,11 +707,46 @@ function application.run(context)
         )
 
         ui.printField(
+            "MCNet version",
+            metadata.mcnetVersion
+                or "LEGACY",
+            start + 9
+        )
+
+        ui.printField(
+            "Protocol",
+            metadata.protocol
+                or "UNKNOWN",
+            start + 10
+        )
+
+        local manifest =
+            archive.manifest
+
+        ui.printField(
+            "Manifest",
+            manifest
+                and "VERIFIED"
+                or "LEGACY / NONE",
+            start + 11
+        )
+
+        ui.printField(
+            "Archive size",
+            manifest
+                and formatBytes(
+                    manifest.totalBytes
+                )
+                or "UNKNOWN",
+            start + 12
+        )
+
+        ui.printField(
             "Verified",
             metadata.verified
                 and "YES"
                 or "NO",
-            start + 9
+            start + 13
         )
 
         ui.pause()
@@ -730,7 +931,9 @@ function application.run(context)
                     {
                         label =
                             "No archived messages",
-                        disabled = true
+                        disabled = true,
+                        description =
+                            "This disk is a snapshot archive; no messages were old enough to archive."
                     }
                 )
             end
@@ -852,7 +1055,9 @@ function application.run(context)
                     {
                         label =
                             "No archived events",
-                        disabled = true
+                        disabled = true,
+                        description =
+                            "This disk is a snapshot archive; no events were old enough to archive."
                     }
                 )
             end
@@ -1371,6 +1576,110 @@ function application.run(context)
         end
     end
 
+    local function archiveSummary()
+        if not ensureArchive() then
+            ui.drawHeader(
+                "Archive unavailable",
+                getDevice(),
+                context.version
+            )
+
+            print("")
+            print(tostring(archiveError))
+            ui.pause()
+            return
+        end
+
+        local counts =
+            archiveCounts(archive)
+
+        local metadata =
+            archive.metadata or {}
+
+        local start =
+            ui.drawHeader(
+                "Archive summary",
+                getDevice(),
+                context.version
+            )
+
+        ui.printField(
+            "Archive",
+            metadata.archiveId
+                or "UNKNOWN",
+            start
+        )
+
+        ui.printField(
+            "Messages",
+            counts.messages,
+            start + 1
+        )
+
+        ui.printField(
+            "Events",
+            counts.events,
+            start + 2
+        )
+
+        ui.printField(
+            "Devices",
+            counts.devices,
+            start + 3
+        )
+
+        ui.printField(
+            "Towers",
+            counts.towers,
+            start + 4
+        )
+
+        local manifest =
+            archive.manifest
+
+        ui.printField(
+            "Archive size",
+            manifest
+                and formatBytes(
+                    manifest.totalBytes
+                )
+                or "UNKNOWN",
+            start + 5
+        )
+
+        ui.printField(
+            "Manifest",
+            manifest
+                and "VERIFIED"
+                or "LEGACY / NONE",
+            start + 6
+        )
+
+        print("")
+
+        if counts.messages == 0
+            and counts.events == 0 then
+
+            print(
+                "Snapshot archive:"
+            )
+
+            print(
+                "no historical messages or events"
+            )
+
+            print(
+                "were old enough to archive."
+            )
+        else
+            print(
+                "Historical records are available."
+            )
+        end
+
+        ui.pause()
+    end
+
     local function ejectDisk()
         ui.drawHeader(
             "Eject archive disk",
@@ -1437,6 +1746,9 @@ function application.run(context)
     while true do
         detectDisk()
 
+        local counts =
+            archiveCounts(archive)
+
         local diskDescription =
             archive
             and (
@@ -1447,6 +1759,21 @@ function application.run(context)
                         .metadata
                         .archiveId
                     or "archive"
+                )
+                .. " | "
+                .. tostring(counts.messages)
+                .. " messages | "
+                .. tostring(counts.events)
+                .. " events"
+                .. (
+                    archive.manifest
+                    and (
+                        " | "
+                        .. formatBytes(
+                            archive.manifest.totalBytes
+                        )
+                    )
+                    or " | legacy"
                 )
             )
             or tostring(
@@ -1468,10 +1795,50 @@ function application.run(context)
 
             {
                 label =
-                    "Browse messages",
+                    "Archive summary",
 
                 description =
-                    "Read archived mailbox records.",
+                    archive
+                    and (
+                        tostring(counts.messages)
+                        .. " messages, "
+                        .. tostring(counts.events)
+                        .. " events, "
+                        .. tostring(counts.devices)
+                        .. " devices, "
+                        .. tostring(counts.towers)
+                        .. " towers"
+                        .. (
+                            archive.manifest
+                            and (
+                                ", "
+                                .. formatBytes(
+                                    archive.manifest.totalBytes
+                                )
+                                .. ", manifest verified."
+                            )
+                            or ", legacy archive."
+                        )
+                    )
+                    or "Insert an MCNet archive disk.",
+
+                disabled =
+                    archive == nil,
+
+                action =
+                    archiveSummary
+            },
+
+            {
+                label =
+                    "Browse messages ("
+                    .. tostring(counts.messages)
+                    .. ")",
+
+                description =
+                    counts.messages > 0
+                    and "Read archived mailbox records."
+                    or "No archived messages on this snapshot disk.",
 
                 disabled =
                     archive == nil,
@@ -1482,10 +1849,14 @@ function application.run(context)
 
             {
                 label =
-                    "Browse events",
+                    "Browse events ("
+                    .. tostring(counts.events)
+                    .. ")",
 
                 description =
-                    "Read archived Core Server events.",
+                    counts.events > 0
+                    and "Read archived Core Server events."
+                    or "No archived events on this snapshot disk.",
 
                 disabled =
                     archive == nil,
@@ -1496,7 +1867,9 @@ function application.run(context)
 
             {
                 label =
-                    "Browse device history",
+                    "Browse device history ("
+                    .. tostring(counts.devices)
+                    .. ")",
 
                 description =
                     "Read the archived device directory.",
@@ -1510,7 +1883,9 @@ function application.run(context)
 
             {
                 label =
-                    "Browse tower history",
+                    "Browse tower history ("
+                    .. tostring(counts.towers)
+                    .. ")",
 
                 description =
                     "Read archived tower reports.",
