@@ -721,22 +721,104 @@ function module.new(network, initialDevice, config, path)
             }
         end
 
-        local messageCount = 0
+        local messagesEligible = 0
+        local deliveredTotal = 0
+        local mailboxTotal = 0
+        local mailboxPending = 0
+        local mailboxSent = 0
 
         for _ in pairs(bundle.messages or {}) do
-            messageCount = messageCount + 1
+            messagesEligible =
+                messagesEligible + 1
         end
+
+        for _, item in pairs(store.mailbox) do
+            mailboxTotal =
+                mailboxTotal + 1
+
+            if item.state == "DELIVERED" then
+                deliveredTotal =
+                    deliveredTotal + 1
+            elseif item.state == "SENT" then
+                mailboxSent =
+                    mailboxSent + 1
+            else
+                mailboxPending =
+                    mailboxPending + 1
+            end
+        end
+
+        local messagesRetained =
+            math.max(
+                0,
+                deliveredTotal
+                - messagesEligible
+            )
+
+        local eventsTotal =
+            #store.events
+
+        local eventsEligible =
+            #(bundle.events or {})
+
+        local eventsRetained =
+            math.max(
+                0,
+                eventsTotal
+                - eventsEligible
+            )
 
         return {
             ready =
-                messageCount > 0
-                or #(bundle.events or {}) > 0,
+                messagesEligible > 0
+                or eventsEligible > 0,
 
-            messages = messageCount,
-            events = #(bundle.events or {}),
+            -- Backwards-compatible names used by the current server UI.
+            messages =
+                messagesEligible,
+
+            events =
+                eventsEligible,
+
             retainDelivered =
                 token.retainDelivered,
+
             retainEvents =
+                token.retainEvents,
+
+            -- Expanded message reporting.
+            mailboxTotal =
+                mailboxTotal,
+
+            mailboxPending =
+                mailboxPending,
+
+            mailboxSent =
+                mailboxSent,
+
+            deliveredTotal =
+                deliveredTotal,
+
+            messagesEligible =
+                messagesEligible,
+
+            messagesRetained =
+                messagesRetained,
+
+            deliveredRetentionLimit =
+                token.retainDelivered,
+
+            -- Expanded event reporting.
+            eventsTotal =
+                eventsTotal,
+
+            eventsEligible =
+                eventsEligible,
+
+            eventsRetained =
+                eventsRetained,
+
+            eventRetentionLimit =
                 token.retainEvents
         }
     end

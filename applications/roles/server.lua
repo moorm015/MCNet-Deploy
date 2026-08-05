@@ -784,17 +784,17 @@ function application.run(context)
     end
 
     local function archivePreview()
-        ui.drawHeader(
-            "Archive preview",
-            getDevice(),
-            context.version
-        )
-
-        print("")
+        local start =
+            ui.drawHeader(
+                "Archive preview",
+                getDevice(),
+                context.version
+            )
 
         if not coreServer
             or not coreServer.getArchiveSummary then
 
+            print("")
             print(
                 "Core Server archive export is unavailable."
             )
@@ -811,60 +811,139 @@ function application.run(context)
                     ARCHIVE_RETAIN_EVENTS
             })
 
-        if not summary.ready then
-            print(
-                "No old records are ready to archive."
-            )
-            print("")
-            print(
-                "The server will retain the newest "
-                .. tostring(
-                    summary.retainDelivered
-                    or ARCHIVE_RETAIN_DELIVERED
-                )
-                .. " delivered messages and "
-                .. tostring(
-                    summary.retainEvents
-                    or ARCHIVE_RETAIN_EVENTS
-                )
-                .. " events."
-            )
-            ui.pause()
-            return
-        end
+        local deliveredTotal =
+            tonumber(summary.deliveredTotal)
+            or tonumber(summary.messagesRetained)
+            or 0
 
-        print(
-            "Messages ready: "
-            .. tostring(
-                summary.messages
-                or 0
+        local messagesRetained =
+            tonumber(summary.messagesRetained)
+            or math.max(
+                0,
+                deliveredTotal
+                - (
+                    tonumber(summary.messagesEligible)
+                    or tonumber(summary.messages)
+                    or 0
+                )
             )
+
+        local messagesEligible =
+            tonumber(summary.messagesEligible)
+            or tonumber(summary.messages)
+            or 0
+
+        local deliveredLimit =
+            tonumber(summary.deliveredRetentionLimit)
+            or tonumber(summary.retainDelivered)
+            or ARCHIVE_RETAIN_DELIVERED
+
+        local eventsTotal =
+            tonumber(summary.eventsTotal)
+            or (
+                (
+                    tonumber(summary.eventsRetained)
+                    or 0
+                )
+                + (
+                    tonumber(summary.eventsEligible)
+                    or tonumber(summary.events)
+                    or 0
+                )
+            )
+
+        local eventsRetained =
+            tonumber(summary.eventsRetained)
+            or math.max(
+                0,
+                eventsTotal
+                - (
+                    tonumber(summary.eventsEligible)
+                    or tonumber(summary.events)
+                    or 0
+                )
+            )
+
+        local eventsEligible =
+            tonumber(summary.eventsEligible)
+            or tonumber(summary.events)
+            or 0
+
+        local eventLimit =
+            tonumber(summary.eventRetentionLimit)
+            or tonumber(summary.retainEvents)
+            or ARCHIVE_RETAIN_EVENTS
+
+        ui.printField(
+            "Delivered total",
+            deliveredTotal,
+            start
         )
 
-        print(
-            "Events ready: "
-            .. tostring(
-                summary.events
-                or 0
-            )
+        ui.printField(
+            "Messages retained",
+            tostring(messagesRetained)
+                .. "/"
+                .. tostring(deliveredLimit),
+            start + 1
+        )
+
+        ui.printField(
+            "Messages ready",
+            messagesEligible,
+            start + 2
+        )
+
+        ui.printField(
+            "Mailbox pending",
+            tonumber(summary.mailboxPending)
+                or 0,
+            start + 3
+        )
+
+        ui.printField(
+            "Mailbox sent",
+            tonumber(summary.mailboxSent)
+                or 0,
+            start + 4
+        )
+
+        ui.printField(
+            "Events total",
+            eventsTotal,
+            start + 5
+        )
+
+        ui.printField(
+            "Events retained",
+            tostring(eventsRetained)
+                .. "/"
+                .. tostring(eventLimit),
+            start + 6
+        )
+
+        ui.printField(
+            "Events ready",
+            eventsEligible,
+            start + 7
         )
 
         print("")
-        print(
-            "Retain delivered: "
-            .. tostring(
-                summary.retainDelivered
-                or ARCHIVE_RETAIN_DELIVERED
-            )
-        )
 
-        print(
-            "Retain events: "
-            .. tostring(
-                summary.retainEvents
-                or ARCHIVE_RETAIN_EVENTS
+        if messagesEligible == 0
+            and eventsEligible == 0 then
+
+            print(
+                "No old records are ready to archive."
             )
-        )
+            print(
+                "A snapshot archive can still be created."
+            )
+        else
+            print(
+                "Old records are ready for archiving."
+            )
+        end
 
         ui.pause()
     end
