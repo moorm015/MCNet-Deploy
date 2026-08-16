@@ -16,6 +16,22 @@ function application.run(context)
     local coreClient = context.coreClient
     local config = displayConfigModule.load()
 
+    -- Be defensive with older, blank or partially-created display profiles.
+    -- The modular installer deliberately preserves .mcnet/display.lua when a
+    -- computer changes role, so the display application must tolerate a saved
+    -- configuration that predates the current "screens" table.
+    if type(config) ~= "table" then
+        config = {}
+    end
+
+    if type(config.screens) ~= "table" then
+        config.screens = {}
+    end
+
+    if type(config.refreshInterval) ~= "number" then
+        config.refreshInterval = 2
+    end
+
     local function loadOptional(path)
         if not fs.exists(path) then
             return nil
