@@ -1,0 +1,41 @@
+# MCNet Rail Wiring Reference v0.9.2
+
+## Standard platform road
+
+```text
+approach rail -> D1 detector -> platform -> D2 detector -> H1 locking track -> D3 detector -> next block
+```
+
+Inputs: D1 approach, D2 berth/stop, D3 exit.
+Output: H1 locking track release.
+
+Fail-safe: H1 unpowered = train held. H1 powered = train released.
+
+## Suggested bundled cable colours
+
+Inputs: white D1, orange D2, magenta D3, light blue spare, yellow occupied, lime emergency, pink manual, gray maintenance.
+
+Outputs: white H1 release, orange signal clear, magenta warning lamp, light blue announcement trigger, yellow maintenance lamp, lime departure bell.
+
+## Intermediate block
+
+```text
+detector -> two normal rails -> locking track
+```
+
+Most of the time the locking track is already released. It only holds when the next block is occupied, reserved, or unknown.
+
+## Junction controller
+
+Think in routes, not loose switches:
+
+```text
+E-CW-OUT
+E-ACW-OUT
+E-IN-CW
+E-IN-ACW
+CIRCLE-CW-THROUGH
+CIRCLE-ACW-THROUGH
+```
+
+A route is allowed only if none of its required track sections or points conflict with another locked route.

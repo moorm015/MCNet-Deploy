@@ -1,0 +1,60 @@
+# MCNet Rail Station Guide v0.9.2
+
+## Current station names
+
+```text
+CENTRAL             Central Station
+LABORATORIES        Laboratories
+ATOLL_REEF          Atoll Reef
+BEE_GARDENS         Bee Gardens
+HALF_WALL           Half Wall
+EASTERN_VILLAGE     Eastern Village
+LITTLE_MEXICO       Little Mexico
+THE_SPA             The Spa
+NEW_EGYPT           New Egypt
+ACME_ESC            ACME ESC Compound
+```
+
+## Lines
+
+```text
+CIRCLE              Yellow
+CENTRAL_LINE        Red
+EASTERN_LINE        Blue
+LITTLE_MEXICO_EXP   Purple
+HONEY_LINE          Green
+ACME_ELECTRIC       Cyan
+PRIVATE_EXPRESS     White
+LAIR_SPUR           Gray / hidden
+```
+
+## Grand Central first layout
+
+```text
+P1 Circle Line clockwise
+P2 Circle Line anticlockwise
+P3 Eastern Line outbound
+P4 Eastern Line inbound
+P5 Central/New Egypt line or ACME electric work-in-progress
+P6 private/express/future platform
+```
+
+## Display types
+
+Station Sign: station name, lines, rolling banner.
+Departures: concourse/main hall upcoming trains.
+Platform Board: next train and calling points for one platform.
+Tube Map: static MCNet map with the current station highlighted.
+
+## Test order
+
+1. Station sign.
+2. Banner cycling.
+3. Map highlight for every station.
+4. Fake departure board.
+5. One platform controller.
+6. Detector/locking track sequence.
+7. Second station controller.
+8. One block controller.
+9. One junction controller.
+10. Wider MCNet routing.

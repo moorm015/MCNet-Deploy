@@ -1,6 +1,6 @@
 return {
     name = "MCNet",
-    version = "0.9.1",
+    version = "0.9.2",
     protocol = 1,
     entrypoint = "kernel/boot.lua",
 
@@ -39,8 +39,14 @@ return {
         { source = "services/communications/contacts.lua", destination = "services/communications/contacts.lua" },
         { source = "services/communications/messaging.lua", destination = "services/communications/messaging.lua" },
 
-        -- NEW
         { source = "services/archive/archive_manager.lua", destination = "services/archive/archive_manager.lua" },
+
+        { source = "services/trains/station_config.lua", destination = "services/trains/station_config.lua" },
+        { source = "services/trains/rail_config.lua", destination = "services/trains/rail_config.lua" },
+        { source = "services/trains/banner.lua", destination = "services/trains/banner.lua" },
+        { source = "services/trains/timetable.lua", destination = "services/trains/timetable.lua" },
+        { source = "services/trains/platform_controller.lua", destination = "services/trains/platform_controller.lua" },
+        { source = "services/trains/station_controller.lua", destination = "services/trains/station_controller.lua" },
 
         { source = "drivers/modem.lua", destination = "drivers/modem.lua" },
 
@@ -51,8 +57,6 @@ return {
         { source = "applications/roles/tower.lua", destination = "applications/roles/tower.lua" },
         { source = "applications/roles/server.lua", destination = "applications/roles/server.lua" },
         { source = "applications/roles/display.lua", destination = "applications/roles/display.lua" },
-
-        -- NEW
         { source = "applications/roles/archive_reader.lua", destination = "applications/roles/archive_reader.lua" },
 
         { source = "tests/communications/packet_test.lua", destination = "tests/communications/packet_test.lua" },
@@ -63,6 +67,9 @@ return {
         { source = "tests/communications/mesh_test.lua", destination = "tests/communications/mesh_test.lua" },
         { source = "tests/communications/core_services_test.lua", destination = "tests/communications/core_services_test.lua" },
         { source = "tests/communications/contacts_test.lua", destination = "tests/communications/contacts_test.lua" },
+
+        { source = "tests/trains/platform_controller_test.lua", destination = "tests/trains/platform_controller_test.lua" },
+        { source = "tests/trains/station_controller_test.lua", destination = "tests/trains/station_controller_test.lua" },
 
         { source = "tests/drivers/modem_test.lua", destination = "tests/drivers/modem_test.lua" },
         { source = "tests/system/device_config_test.lua", destination = "tests/system/device_config_test.lua" },

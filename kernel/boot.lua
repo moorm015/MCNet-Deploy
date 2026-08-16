@@ -1,9 +1,9 @@
 -- MCNet root boot kernel
--- Version 0.9.1
+-- Version 0.9.2
 -- Routed network, core directory/mailbox, archive services,
--- monitor walls and role applications.
+-- monitor walls, railway configuration and role applications.
 
-local VERSION = "0.9.1"
+local VERSION = "0.9.2"
 local PROTOCOL = 1
 local BASE_URL = "https://raw.githubusercontent.com/moorm015/MCNet-Deploy/main/"
 local INSTALLER_URL = BASE_URL .. "installer/install.lua"
@@ -36,6 +36,13 @@ local requiredFiles = {
     "services/communications/messaging.lua",
 
     "services/archive/archive_manager.lua",
+
+    "services/trains/station_config.lua",
+    "services/trains/rail_config.lua",
+    "services/trains/banner.lua",
+    "services/trains/timetable.lua",
+    "services/trains/platform_controller.lua",
+    "services/trains/station_controller.lua",
 
     "drivers/modem.lua",
 
@@ -138,6 +145,24 @@ local idleManagerFactory =
 
 local displayConfigModule =
     load("services/system/display_config.lua")
+
+local stationConfigModule =
+    load("services/trains/station_config.lua")
+
+local railConfig =
+    load("services/trains/rail_config.lua")
+
+local railBanner =
+    load("services/trains/banner.lua")
+
+local railTimetable =
+    load("services/trains/timetable.lua")
+
+local platformControllerModule =
+    load("services/trains/platform_controller.lua")
+
+local stationControllerModule =
+    load("services/trains/station_controller.lua")
 
 local packetLibrary =
     load("services/communications/packet.lua")
@@ -279,6 +304,35 @@ local idleManager =
     )
 
 loading.step("Idle manager created")
+
+local stationController = nil
+
+if device.type == "STATION" then
+    local stationLocalConfig =
+        stationConfigModule.load()
+
+    local stationReason = nil
+
+    stationController,
+        stationReason =
+        stationControllerModule.new({
+            platformControllerModule =
+                platformControllerModule,
+
+            stationConfig =
+                stationLocalConfig
+        })
+
+    if not stationController then
+        plainFailure(
+            "Could not create station controller: "
+            .. tostring(stationReason)
+        )
+    end
+
+    loading.step("Station controller created")
+end
+
 loading.step("Directory and contacts ready")
 loading.step("System services loaded")
 
@@ -317,6 +371,15 @@ local context = {
     messaging = messaging,
 
     displayConfigModule = displayConfigModule,
+
+    stationConfigModule = stationConfigModule,
+    railConfig = railConfig,
+    railBanner = railBanner,
+    railTimetable = railTimetable,
+    platformControllerModule = platformControllerModule,
+    stationControllerModule = stationControllerModule,
+    stationController = stationController,
+
     idleManager = idleManager,
     appManager = appManager,
     displayReason = displayReason
@@ -408,6 +471,14 @@ if idleManager
         )
 end
 
+if stationController then
+    tasks[#tasks + 1] =
+        guardedTask(
+            "Station controller",
+            stationController.run
+        )
+end
+
 if parallel
     and parallel.waitForAny then
 
@@ -430,6 +501,10 @@ end
 
 if idleManager then
     idleManager.stop()
+end
+
+if stationController then
+    stationController.stop()
 end
 
 ui.restoreNative()

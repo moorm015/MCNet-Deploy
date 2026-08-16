@@ -2,10 +2,8 @@
 -- Version 0.9.2
 --
 -- Stores the permanent identity and local operating configuration for one
--- railway station.
---
--- This module does not directly control trains, signals or points. It stores
--- the configuration used by the later station, platform and display services.
+-- railway station. This module does not control trains, signals or points;
+-- it provides the shared configuration those later services will use.
 
 local module = {}
 
@@ -30,10 +28,6 @@ local PLATFORM_DIRECTIONS = {
     "ANTICLOCKWISE",
     "INBOUND",
     "OUTBOUND",
-    "NORTHBOUND",
-    "SOUTHBOUND",
-    "EASTBOUND",
-    "WESTBOUND",
     "BOTH",
     "UNKNOWN"
 }
@@ -114,7 +108,7 @@ local function cleanShortName(value)
             ""
         )
 
-    return string.sub(value, 1, 8)
+    return string.sub(value, 1, 6)
 end
 
 local function cleanText(value)
@@ -252,49 +246,6 @@ local function normalisePlatform(value, index)
         direction = "UNKNOWN"
     end
 
-    -- v0.9.1/v0.9.2 compatibility:
-    -- Older station files used one generic sensor and one signal field.
-    -- Keep those values if present, but expose the actual station hardware
-    -- model we have now agreed:
-    --
-    --   D1 approach detector
-    --   D2 berth detector
-    --   H1 locking-track release
-    --   D3 exit detector
-    --
-    -- The values are logical IDs only. Physical bundled-cable colours are
-    -- configured later by the local platform-controller service.
-    local legacySensor =
-        cleanIdentifier(
-            value.sensor
-        )
-
-    local legacySignal =
-        cleanIdentifier(
-            value.signal
-        )
-
-    local approachSensor =
-        cleanIdentifier(
-            value.approachSensor
-        )
-
-    local berthSensor =
-        cleanIdentifier(
-            value.berthSensor
-            or legacySensor
-        )
-
-    local exitSensor =
-        cleanIdentifier(
-            value.exitSensor
-        )
-
-    local holdOutput =
-        cleanIdentifier(
-            value.holdOutput
-        )
-
     return {
         id = platformId,
 
@@ -311,11 +262,6 @@ local function normalisePlatform(value, index)
         lines =
             normaliseStringList(
                 value.lines
-                or (
-                    value.line
-                    and { value.line }
-                    or {}
-                )
             ),
 
         enabled =
@@ -324,15 +270,15 @@ local function normalisePlatform(value, index)
                 true
             ),
 
-        -- Logical station-control points.
-        approachSensor = approachSensor,
-        berthSensor = berthSensor,
-        exitSensor = exitSensor,
-        holdOutput = holdOutput,
+        sensor =
+            cleanIdentifier(
+                value.sensor
+            ),
 
-        -- Kept for compatibility with older saved configurations.
-        sensor = legacySensor,
-        signal = legacySignal,
+        signal =
+            cleanIdentifier(
+                value.signal
+            ),
 
         notes =
             cleanText(
@@ -372,12 +318,7 @@ local function normalisePlatforms(value)
                     name = "Platform 1",
                     direction = "BOTH",
                     status = "OPEN",
-                    enabled = true,
-                    lines = {},
-                    approachSensor = "",
-                    berthSensor = "",
-                    exitSensor = "",
-                    holdOutput = ""
+                    enabled = true
                 },
                 1
             )
@@ -582,27 +523,10 @@ end
 
 function module.createDefault()
     return {
-        format = 2,
+        format = 1,
 
-        -- Unique MCNet identity of this physical station controller.
         stationId =
             module.getSuggestedStationID(),
-
-        -- Logical passenger-network location used by the Tube map,
-        -- timetable and display systems.
-        --
-        -- Examples:
-        -- CENTRAL
-        -- LABORATORIES
-        -- ATOLL_REEF
-        -- BEE_GARDENS
-        -- HALF_WALL
-        -- EASTERN_VILLAGE
-        -- LITTLE_MEXICO
-        -- THE_SPA
-        -- NEW_EGYPT
-        -- ACME_ESC
-        mapId = "CENTRAL",
 
         name = "",
 
@@ -622,28 +546,12 @@ function module.createDefault()
                 direction = "BOTH",
                 lines = {},
                 enabled = true,
-
-                -- Standard MCNet platform hardware:
-                -- D1 = approach detector
-                -- D2 = berth detector
-                -- H1 = locking-track release
-                -- D3 = exit detector
-                approachSensor = "",
-                berthSensor = "",
-                exitSensor = "",
-                holdOutput = "",
-
-                -- Legacy fields retained for old configuration files.
                 sensor = "",
                 signal = "",
-
                 notes = ""
             }
         },
 
-        -- Station-local display declarations are retained because they may
-        -- later be useful for station-owned displays. Independent DISPLAY
-        -- computers use services/system/display_config.lua instead.
         displays = {},
 
         banner = {
@@ -691,7 +599,7 @@ function module.normalise(config)
             math.floor(
                 tonumber(
                     config.format
-                ) or result.format
+                ) or 1
             )
         )
 
@@ -705,17 +613,6 @@ function module.normalise(config)
     if result.stationId == "" then
         result.stationId =
             module.getSuggestedStationID()
-    end
-
-    result.mapId =
-        cleanIdentifier(
-            config.mapId
-            or config.station
-            or result.mapId
-        )
-
-    if result.mapId == "" then
-        result.mapId = "CENTRAL"
     end
 
     result.name =
@@ -826,11 +723,6 @@ function module.validate(config)
     if value.stationId == "" then
         return false,
             "Station ID is required"
-    end
-
-    if value.mapId == "" then
-        return false,
-            "Station map ID is required"
     end
 
     if value.name == "" then
