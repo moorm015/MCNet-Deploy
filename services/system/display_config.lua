@@ -1,688 +1,289 @@
--- MCNet station configuration service
+-- MCNet multi-monitor display-wall configuration
 -- Version 0.9.2
 --
--- Stores the permanent identity and local operating configuration for one
--- railway station.
+-- Stores per-monitor dashboard profiles for DISPLAY computers.
 --
--- This module does not directly control trains, signals or points. It stores
--- the configuration used by the later station, platform and display services.
+-- Current profile fields:
+--   dashboard = dashboard ID
+--   textScale = monitor text scale
+--   station   = rail station/map ID when required
+--   platform  = platform ID when required
+--
+-- This service intentionally contains dashboard metadata only. Rendering is
+-- performed by applications/roles/display.lua.
+--
+-- Legacy v0.9.0 train dashboard IDs are accepted and upgraded automatically.
 
 local module = {}
 
-local PATH = ".mcnet/station.lua"
+local PATH = ".mcnet/display.lua"
 
-local STATION_STATUSES = {
-    "OPEN",
-    "CLOSED",
-    "MAINTENANCE",
-    "EMERGENCY",
-    "PLANNED"
+local dashboards = {
+    {
+        id = "communications.overview",
+        label = "Communications overview",
+        category = "Communications",
+        description = "Core Server, towers, devices, mailbox and heartbeat status."
+    },
+    {
+        id = "communications.towers",
+        label = "Tower status",
+        category = "Communications",
+        description = "MCNet tower availability and routing status."
+    },
+    {
+        id = "communications.devices",
+        label = "Device directory",
+        category = "Communications",
+        description = "Known MCNet devices and their online state."
+    },
+    {
+        id = "communications.mailbox",
+        label = "Mailbox status",
+        category = "Communications",
+        description = "Persistent mailbox queue and delivery statistics."
+    },
+
+    {
+        id = "trains.station_sign",
+        label = "Station identity",
+        category = "Trains",
+        description = "Station name, served lines and rotating passenger information.",
+        needsStation = true
+    },
+    {
+        id = "trains.departures",
+        label = "Station departures",
+        category = "Trains",
+        description = "Upcoming departures for the selected station.",
+        needsStation = true
+    },
+    {
+        id = "trains.platform",
+        label = "Platform departure board",
+        category = "Trains",
+        description = "Next trains and calling points for one selected platform.",
+        needsStation = true,
+        needsPlatform = true
+    },
+    {
+        id = "trains.map",
+        label = "Rail network map",
+        category = "Trains",
+        description = "Tube-style network map highlighting the selected station.",
+        needsStation = true
+    },
+    {
+        id = "trains.network_status",
+        label = "Rail network status",
+        category = "Trains",
+        description = "Passenger-facing line and network status."
+    },
+    {
+        id = "trains.operations",
+        label = "Live rail operations (future)",
+        category = "Trains",
+        description = "Future live train tracking and operational control display.",
+        future = true
+    },
+
+    {
+        id = "power.overview",
+        label = "Power overview (future)",
+        category = "Power",
+        description = "Future MCNet power telemetry dashboard.",
+        future = true
+    }
 }
 
-local PLATFORM_STATUSES = {
-    "OPEN",
-    "CLOSED",
-    "MAINTENANCE"
+local categories = {
+    "Communications",
+    "Trains",
+    "Power"
 }
 
-local PLATFORM_DIRECTIONS = {
-    "CLOCKWISE",
-    "ANTICLOCKWISE",
-    "INBOUND",
-    "OUTBOUND",
-    "NORTHBOUND",
-    "SOUTHBOUND",
-    "EASTBOUND",
-    "WESTBOUND",
-    "BOTH",
-    "UNKNOWN"
+local aliases = {
+    -- v0.9.0 train display IDs.
+    ["trains.network"] = "trains.map",
+    ["trains.stations"] = "trains.departures",
+    ["trains.routes"] = "trains.network_status"
 }
 
-local DISPLAY_ROLES = {
-    "STATION_SIGN",
-    "MAP",
-    "DEPARTURES",
-    "PLATFORM",
-    "STATUS"
-}
-
-local function deepCopy(value, seen)
-    if type(value) ~= "table" then
-        return value
-    end
-
-    seen = seen or {}
-
-    if seen[value] then
-        return seen[value]
-    end
-
+local function copyTable(source)
     local result = {}
-    seen[value] = result
 
-    for key, item in pairs(value) do
-        result[deepCopy(key, seen)] =
-            deepCopy(item, seen)
+    for key, value in pairs(source or {}) do
+        if type(value) == "table" then
+            result[key] = copyTable(value)
+        else
+            result[key] = value
+        end
     end
 
     return result
 end
 
-local function contains(list, value)
-    for _, item in ipairs(list or {}) do
-        if item == value then
-            return true
+local function canonicalDashboard(id)
+    id = tostring(id or "communications.overview")
+
+    if aliases[id] then
+        return aliases[id]
+    end
+
+    return id
+end
+
+local function findDashboard(id)
+    id = canonicalDashboard(id)
+
+    for _, item in ipairs(dashboards) do
+        if item.id == id then
+            return item
         end
     end
 
-    return false
+    return nil
 end
 
-local function cleanIdentifier(value)
+local function validDashboard(id)
+    return findDashboard(id) ~= nil
+end
+
+local function cleanStation(value)
     value =
         string.upper(
-            tostring(value or "")
+            tostring(
+                value
+                or "CENTRAL"
+            )
         )
 
     value =
         string.gsub(
             value,
             "%s+",
-            "-"
+            "_"
         )
 
     value =
         string.gsub(
             value,
-            "[^A-Z0-9%-_]",
+            "[^A-Z0-9_%-]",
             ""
         )
+
+    if value == "" then
+        return "CENTRAL"
+    end
 
     return value
 end
 
-local function cleanShortName(value)
+local function cleanPlatform(value)
     value =
         string.upper(
-            tostring(value or "")
-        )
-
-    value =
-        string.gsub(
-            value,
-            "[^A-Z0-9]",
-            ""
-        )
-
-    return string.sub(value, 1, 8)
-end
-
-local function cleanText(value)
-    value = tostring(value or "")
-
-    value =
-        string.gsub(
-            value,
-            "[\r\n\t]",
-            " "
+            tostring(
+                value
+                or "P1"
+            )
         )
 
     value =
         string.gsub(
             value,
             "%s+",
-            " "
-        )
-
-    value =
-        string.gsub(
-            value,
-            "^%s+",
             ""
         )
 
     value =
         string.gsub(
             value,
-            "%s+$",
+            "[^A-Z0-9_%-]",
             ""
         )
 
-    return value
-end
-
-local function numberInRange(
-    value,
-    fallback,
-    minimum,
-    maximum
-)
-    value =
-        tonumber(value)
-        or fallback
-
-    if value < minimum then
-        return minimum
-    end
-
-    if value > maximum then
-        return maximum
+    if value == "" then
+        return "P1"
     end
 
     return value
 end
 
-local function booleanValue(value, fallback)
-    if type(value) == "boolean" then
-        return value
-    end
-
-    return fallback == true
-end
-
-local function normaliseStringList(value)
-    local result = {}
-    local seen = {}
-
-    if type(value) ~= "table" then
-        return result
-    end
-
-    for _, item in ipairs(value) do
-        local cleaned =
-            cleanIdentifier(item)
-
-        if cleaned ~= ""
-            and not seen[cleaned] then
-
-            seen[cleaned] = true
-            result[#result + 1] =
-                cleaned
-        end
-    end
-
-    return result
-end
-
-local function normalisePlatform(value, index)
-    value =
-        type(value) == "table"
-        and value
-        or {}
-
-    local platformId =
-        cleanIdentifier(
-            value.id
-            or value.platformId
-            or ("P" .. tostring(index))
-        )
-
-    if platformId == "" then
-        platformId =
-            "P" .. tostring(index)
-    end
-
-    local status =
-        string.upper(
-            tostring(
-                value.status
-                or "OPEN"
-            )
-        )
-
-    if not contains(
-        PLATFORM_STATUSES,
-        status
-    ) then
-        status = "OPEN"
-    end
-
-    local direction =
-        string.upper(
-            tostring(
-                value.direction
-                or "UNKNOWN"
-            )
-        )
-
-    if not contains(
-        PLATFORM_DIRECTIONS,
-        direction
-    ) then
-        direction = "UNKNOWN"
-    end
-
-    -- v0.9.1/v0.9.2 compatibility:
-    -- Older station files used one generic sensor and one signal field.
-    -- Keep those values if present, but expose the actual station hardware
-    -- model we have now agreed:
-    --
-    --   D1 approach detector
-    --   D2 berth detector
-    --   H1 locking-track release
-    --   D3 exit detector
-    --
-    -- The values are logical IDs only. Physical bundled-cable colours are
-    -- configured later by the local platform-controller service.
-    local legacySensor =
-        cleanIdentifier(
-            value.sensor
-        )
-
-    local legacySignal =
-        cleanIdentifier(
-            value.signal
-        )
-
-    local approachSensor =
-        cleanIdentifier(
-            value.approachSensor
-        )
-
-    local berthSensor =
-        cleanIdentifier(
-            value.berthSensor
-            or legacySensor
-        )
-
-    local exitSensor =
-        cleanIdentifier(
-            value.exitSensor
-        )
-
-    local holdOutput =
-        cleanIdentifier(
-            value.holdOutput
-        )
-
+function module.defaultProfile()
     return {
-        id = platformId,
-
-        name =
-            cleanText(
-                value.name
-                or ("Platform " .. tostring(index))
-            ),
-
-        status = status,
-
-        direction = direction,
-
-        lines =
-            normaliseStringList(
-                value.lines
-                or (
-                    value.line
-                    and { value.line }
-                    or {}
-                )
-            ),
-
-        enabled =
-            booleanValue(
-                value.enabled,
-                true
-            ),
-
-        -- Logical station-control points.
-        approachSensor = approachSensor,
-        berthSensor = berthSensor,
-        exitSensor = exitSensor,
-        holdOutput = holdOutput,
-
-        -- Kept for compatibility with older saved configurations.
-        sensor = legacySensor,
-        signal = legacySignal,
-
-        notes =
-            cleanText(
-                value.notes
-            )
+        dashboard = "communications.overview",
+        textScale = 0.5,
+        station = "CENTRAL",
+        platform = "P1"
     }
 end
 
-local function normalisePlatforms(value)
-    local result = {}
-    local seen = {}
-
-    if type(value) ~= "table" then
-        value = {}
-    end
-
-    for index, item in ipairs(value) do
-        local platform =
-            normalisePlatform(
-                item,
-                index
-            )
-
-        if not seen[platform.id] then
-            seen[platform.id] = true
-
-            result[#result + 1] =
-                platform
-        end
-    end
-
-    if #result == 0 then
-        result[1] =
-            normalisePlatform(
-                {
-                    id = "P1",
-                    name = "Platform 1",
-                    direction = "BOTH",
-                    status = "OPEN",
-                    enabled = true,
-                    lines = {},
-                    approachSensor = "",
-                    berthSensor = "",
-                    exitSensor = "",
-                    holdOutput = ""
-                },
-                1
-            )
-    end
-
-    return result
-end
-
-local function normaliseDisplay(value, index)
-    value =
-        type(value) == "table"
-        and value
-        or {}
-
-    local displayId =
-        cleanIdentifier(
-            value.id
-            or value.displayId
-            or ("DISPLAY-" .. tostring(index))
-        )
-
-    if displayId == "" then
-        displayId =
-            "DISPLAY-" .. tostring(index)
-    end
-
-    local role =
-        string.upper(
-            tostring(
-                value.role
-                or value.type
-                or "STATUS"
-            )
-        )
-
-    if not contains(
-        DISPLAY_ROLES,
-        role
-    ) then
-        role = "STATUS"
-    end
-
-    return {
-        id = displayId,
-
-        role = role,
-
-        peripheral =
-            cleanText(
-                value.peripheral
-                or value.side
-            ),
-
-        platform =
-            cleanIdentifier(
-                value.platform
-            ),
-
-        enabled =
-            booleanValue(
-                value.enabled,
-                true
-            ),
-
-        textScale =
-            numberInRange(
-                value.textScale,
-                0.5,
-                0.5,
-                5
-            ),
-
-        refreshInterval =
-            numberInRange(
-                value.refreshInterval,
-                1,
-                0.2,
-                60
-            )
-    }
-end
-
-local function normaliseDisplays(value)
-    local result = {}
-    local seen = {}
-
-    if type(value) ~= "table" then
-        return result
-    end
-
-    for index, item in ipairs(value) do
-        local display =
-            normaliseDisplay(
-                item,
-                index
-            )
-
-        if not seen[display.id] then
-            seen[display.id] = true
-
-            result[#result + 1] =
-                display
-        end
-    end
-
-    return result
-end
-
-local function normaliseAccess(value)
-    value =
-        type(value) == "table"
-        and value
-        or {}
-
-    return {
-        pdaEnabled =
-            booleanValue(
-                value.pdaEnabled,
-                true
-            ),
-
-        range =
-            numberInRange(
-                value.range,
-                12,
-                1,
-                128
-            ),
-
-        roles =
-            normaliseStringList(
-                value.roles
-                or {
-                    "NETWORK_ADMIN",
-                    "RAIL_ADMIN"
-                }
-            )
-    }
-end
-
-local function normaliseBanner(value)
-    value =
-        type(value) == "table"
-        and value
-        or {}
-
-    local categories =
-        normaliseStringList(
-            value.categories
-            or {
-                "EMERGENCY",
-                "SERVICE",
-                "SAFETY",
-                "ADVICE",
-                "NEWS",
-                "JOKE"
-            }
-        )
-
-    return {
-        enabled =
-            booleanValue(
-                value.enabled,
-                true
-            ),
-
-        interval =
-            numberInRange(
-                value.interval,
-                10,
-                2,
-                300
-            ),
-
-        scrollSpeed =
-            numberInRange(
-                value.scrollSpeed,
-                0.15,
-                0.05,
-                2
-            ),
-
-        categories = categories,
-
-        localMessages =
-            type(value.localMessages)
-                == "table"
-            and deepCopy(
-                value.localMessages
-            )
-            or {}
-    }
-end
-
-function module.getSuggestedStationID()
-    return "STN-"
-        .. string.format(
-            "%03d",
-            os.getComputerID()
-        )
-end
-
-function module.createDefault()
+function module.default()
     return {
         format = 2,
-
-        -- Unique MCNet identity of this physical station controller.
-        stationId =
-            module.getSuggestedStationID(),
-
-        -- Logical passenger-network location used by the Tube map,
-        -- timetable and display systems.
-        --
-        -- Examples:
-        -- CENTRAL
-        -- LABORATORIES
-        -- ATOLL_REEF
-        -- BEE_GARDENS
-        -- HALF_WALL
-        -- EASTERN_VILLAGE
-        -- LITTLE_MEXICO
-        -- THE_SPA
-        -- NEW_EGYPT
-        -- ACME_ESC
-        mapId = "CENTRAL",
-
-        name = "",
-
-        shortName = "",
-
-        region = "UNKNOWN",
-
-        status = "PLANNED",
-
-        lines = {},
-
-        platforms = {
-            {
-                id = "P1",
-                name = "Platform 1",
-                status = "OPEN",
-                direction = "BOTH",
-                lines = {},
-                enabled = true,
-
-                -- Standard MCNet platform hardware:
-                -- D1 = approach detector
-                -- D2 = berth detector
-                -- H1 = locking-track release
-                -- D3 = exit detector
-                approachSensor = "",
-                berthSensor = "",
-                exitSensor = "",
-                holdOutput = "",
-
-                -- Legacy fields retained for old configuration files.
-                sensor = "",
-                signal = "",
-
-                notes = ""
-            }
-        },
-
-        -- Station-local display declarations are retained because they may
-        -- later be useful for station-owned displays. Independent DISPLAY
-        -- computers use services/system/display_config.lua instead.
-        displays = {},
-
-        banner = {
-            enabled = true,
-            interval = 10,
-            scrollSpeed = 0.15,
-            categories = {
-                "EMERGENCY",
-                "SERVICE",
-                "SAFETY",
-                "ADVICE",
-                "NEWS",
-                "JOKE"
-            },
-            localMessages = {}
-        },
-
-        access = {
-            pdaEnabled = true,
-            range = 12,
-            roles = {
-                "NETWORK_ADMIN",
-                "RAIL_ADMIN"
-            }
-        },
-
-        timezone = "MINECRAFT",
-
-        notes = ""
+        refreshInterval = 2,
+        screens = {}
     }
 end
 
-function module.normalise(config)
-    local result =
-        module.createDefault()
+function module.normaliseProfile(profile)
+    profile =
+        type(profile) == "table"
+        and profile
+        or {}
 
-    config =
-        type(config) == "table"
-        and config
+    local result =
+        module.defaultProfile()
+
+    local dashboard =
+        canonicalDashboard(
+            profile.dashboard
+        )
+
+    if validDashboard(dashboard) then
+        result.dashboard = dashboard
+    end
+
+    local scale =
+        tonumber(
+            profile.textScale
+        )
+        or result.textScale
+
+    if scale < 0.5 then
+        scale = 0.5
+    end
+
+    if scale > 5 then
+        scale = 5
+    end
+
+    result.textScale = scale
+
+    -- Preserve these even for dashboards that do not currently require them.
+    -- That makes switching a monitor between rail display types painless.
+    result.station =
+        cleanStation(
+            profile.station
+            or result.station
+        )
+
+    result.platform =
+        cleanPlatform(
+            profile.platform
+            or result.platform
+        )
+
+    return result
+end
+
+function module.normalise(value)
+    local result =
+        module.default()
+
+    value =
+        type(value) == "table"
+        and value
         or {}
 
     result.format =
@@ -690,239 +291,72 @@ function module.normalise(config)
             1,
             math.floor(
                 tonumber(
-                    config.format
-                ) or result.format
+                    value.format
+                )
+                or result.format
             )
         )
 
-    result.stationId =
-        cleanIdentifier(
-            config.stationId
-            or config.address
-            or result.stationId
+    result.refreshInterval =
+        tonumber(
+            value.refreshInterval
         )
+        or result.refreshInterval
 
-    if result.stationId == "" then
-        result.stationId =
-            module.getSuggestedStationID()
+    if result.refreshInterval < 1 then
+        result.refreshInterval = 1
     end
 
-    result.mapId =
-        cleanIdentifier(
-            config.mapId
-            or config.station
-            or result.mapId
-        )
-
-    if result.mapId == "" then
-        result.mapId = "CENTRAL"
+    if result.refreshInterval > 30 then
+        result.refreshInterval = 30
     end
 
-    result.name =
-        cleanText(
-            config.name
-            or config.friendlyName
-        )
+    if type(value.screens) == "table" then
+        for name, profile in pairs(value.screens) do
+            if type(name) == "string"
+                and name ~= ""
+                and type(profile) == "table" then
 
-    result.shortName =
-        cleanShortName(
-            config.shortName
-        )
-
-    if result.shortName == ""
-        and result.name ~= "" then
-
-        local suggested =
-            string.gsub(
-                result.name,
-                "[^A-Za-z0-9]",
-                ""
-            )
-
-        result.shortName =
-            cleanShortName(
-                suggested
-            )
+                result.screens[name] =
+                    module.normaliseProfile(
+                        profile
+                    )
+            end
+        end
     end
-
-    result.region =
-        cleanIdentifier(
-            config.region
-            or "UNKNOWN"
-        )
-
-    if result.region == "" then
-        result.region = "UNKNOWN"
-    end
-
-    result.status =
-        string.upper(
-            tostring(
-                config.status
-                or "PLANNED"
-            )
-        )
-
-    if not contains(
-        STATION_STATUSES,
-        result.status
-    ) then
-        result.status = "PLANNED"
-    end
-
-    result.lines =
-        normaliseStringList(
-            config.lines
-        )
-
-    result.platforms =
-        normalisePlatforms(
-            config.platforms
-        )
-
-    result.displays =
-        normaliseDisplays(
-            config.displays
-        )
-
-    result.banner =
-        normaliseBanner(
-            config.banner
-        )
-
-    result.access =
-        normaliseAccess(
-            config.access
-        )
-
-    result.timezone =
-        cleanIdentifier(
-            config.timezone
-            or "MINECRAFT"
-        )
-
-    if result.timezone == "" then
-        result.timezone =
-            "MINECRAFT"
-    end
-
-    result.notes =
-        cleanText(
-            config.notes
-        )
 
     return result
-end
-
-function module.validate(config)
-    if type(config) ~= "table" then
-        return false,
-            "Station configuration must be a table"
-    end
-
-    local value =
-        module.normalise(config)
-
-    if value.stationId == "" then
-        return false,
-            "Station ID is required"
-    end
-
-    if value.mapId == "" then
-        return false,
-            "Station map ID is required"
-    end
-
-    if value.name == "" then
-        return false,
-            "Station name is required"
-    end
-
-    if value.shortName == "" then
-        return false,
-            "Station short name is required"
-    end
-
-    if #value.platforms == 0 then
-        return false,
-            "At least one platform is required"
-    end
-
-    local platformIds = {}
-
-    for _, platform in ipairs(
-        value.platforms
-    ) do
-        if platformIds[platform.id] then
-            return false,
-                "Duplicate platform ID: "
-                .. tostring(platform.id)
-        end
-
-        platformIds[platform.id] = true
-    end
-
-    for _, display in ipairs(
-        value.displays
-    ) do
-        if display.role == "PLATFORM"
-            and display.platform ~= ""
-            and not platformIds[
-                display.platform
-            ] then
-
-            return false,
-                "Display "
-                .. tostring(display.id)
-                .. " references unknown platform "
-                .. tostring(display.platform)
-        end
-    end
-
-    return true
-end
-
-function module.isConfigured(config)
-    local valid =
-        module.validate(config)
-
-    return valid == true
 end
 
 function module.load(path)
     path = path or PATH
 
     if not fs.exists(path) then
-        return module.createDefault()
+        return module.default()
     end
 
-    local loaded, config =
+    local loaded, value =
         pcall(
             dofile,
             path
         )
 
     if not loaded
-        or type(config) ~= "table" then
+        or type(value) ~= "table" then
 
-        return module.createDefault()
+        return module.default()
     end
 
-    return module.normalise(config)
+    return module.normalise(value)
 end
 
-function module.save(config, path)
+function module.save(value, path)
     path = path or PATH
 
-    local normalised =
-        module.normalise(config)
-
-    local valid, reason =
-        module.validate(normalised)
-
-    if not valid then
-        return false, reason
-    end
+    value =
+        module.normalise(
+            value
+        )
 
     local directory =
         fs.getDir(path)
@@ -948,33 +382,46 @@ function module.save(config, path)
 
     if not file then
         return false,
-            "Could not open station configuration file"
+            "Could not write display configuration"
     end
 
-    file.write("return ")
-
-    file.write(
-        textutils.serialize(
-            normalised
+    local written, reason =
+        pcall(
+            function()
+                file.write("return ")
+                file.write(
+                    textutils.serialize(
+                        value
+                    )
+                )
+                file.write("\n")
+            end
         )
-    )
 
-    file.write("\n")
     file.close()
 
-    local checked, savedValue =
+    if not written then
+        if fs.exists(temporary) then
+            fs.delete(temporary)
+        end
+
+        return false,
+            tostring(reason)
+    end
+
+    local checked, saved =
         pcall(
             dofile,
             temporary
         )
 
     if not checked
-        or type(savedValue) ~= "table" then
+        or type(saved) ~= "table" then
 
         fs.delete(temporary)
 
         return false,
-            "Could not verify station configuration file"
+            "Could not verify display configuration"
     end
 
     if fs.exists(path) then
@@ -989,68 +436,96 @@ function module.save(config, path)
     return true
 end
 
-function module.findPlatform(config, platformId)
-    config =
-        module.normalise(config)
+function module.getDashboards(category)
+    local result = {}
 
-    platformId =
-        cleanIdentifier(
-            platformId
-        )
+    for _, item in ipairs(dashboards) do
+        if not category
+            or item.category == category then
 
-    for _, platform in ipairs(
-        config.platforms
-    ) do
-        if platform.id == platformId then
-            return deepCopy(platform)
+            result[#result + 1] =
+                copyTable(item)
         end
     end
 
-    return nil
+    return result
 end
 
-function module.findDisplay(config, displayId)
-    config =
-        module.normalise(config)
+function module.getDashboard(id)
+    local item =
+        findDashboard(id)
 
-    displayId =
-        cleanIdentifier(
-            displayId
-        )
-
-    for _, display in ipairs(
-        config.displays
-    ) do
-        if display.id == displayId then
-            return deepCopy(display)
-        end
+    if not item then
+        return nil
     end
 
-    return nil
+    return copyTable(item)
 end
 
-function module.getStationStatuses()
-    return deepCopy(
-        STATION_STATUSES
+function module.getCategories()
+    return copyTable(
+        categories
     )
 end
 
-function module.getPlatformStatuses()
-    return deepCopy(
-        PLATFORM_STATUSES
-    )
+function module.getLabel(id)
+    local item =
+        findDashboard(id)
+
+    if item then
+        return item.label
+    end
+
+    return tostring(id)
 end
 
-function module.getPlatformDirections()
-    return deepCopy(
-        PLATFORM_DIRECTIONS
-    )
+function module.getDescription(id)
+    local item =
+        findDashboard(id)
+
+    if item then
+        return item.description
+    end
+
+    return tostring(id)
 end
 
-function module.getDisplayRoles()
-    return deepCopy(
-        DISPLAY_ROLES
-    )
+function module.needsStation(id)
+    local item =
+        findDashboard(id)
+
+    return item
+        and item.needsStation == true
+        or false
+end
+
+function module.needsPlatform(id)
+    local item =
+        findDashboard(id)
+
+    return item
+        and item.needsPlatform == true
+        or false
+end
+
+function module.isFuture(id)
+    local item =
+        findDashboard(id)
+
+    return item
+        and item.future == true
+        or false
+end
+
+function module.resolveDashboard(id)
+    local resolved =
+        canonicalDashboard(id)
+
+    if validDashboard(resolved) then
+        return resolved
+    end
+
+    return "communications.overview"
 end
 
 function module.getPath()
