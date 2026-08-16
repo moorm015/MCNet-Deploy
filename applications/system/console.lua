@@ -1,4 +1,5 @@
 -- MCNet system console application
+-- Version 0.9.2
 
 local application = {}
 
@@ -506,6 +507,16 @@ function application.run(context)
             label = "Display configuration tests",
             compactLabel = "Display tests",
             path = "tests/system/display_config_test.lua"
+        },
+        {
+            label = "Rail platform controller tests",
+            compactLabel = "Rail platform",
+            path = "tests/trains/platform_controller_test.lua"
+        },
+        {
+            label = "Rail station controller tests",
+            compactLabel = "Rail station",
+            path = "tests/trains/station_controller_test.lua"
         }
     }
 
