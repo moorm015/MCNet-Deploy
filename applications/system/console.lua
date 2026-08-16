@@ -56,25 +56,29 @@ function application.run(context)
         return true
     end
 
-    local function installOrUpdate()
-        ui.drawHeader("Install or update MCNet", getDevice(), VERSION)
+    local function runInstaller(title)
+        ui.drawHeader(
+            title or "Install or update MCNet",
+            getDevice(),
+            VERSION
+        )
         print("")
         print("Downloading standalone installer...")
 
         if not http or not http.get then
             print("")
             print("HTTP is disabled or unavailable.")
-            ui.pause()
-            return
+            return false, "HTTP is disabled or unavailable"
         end
 
-        local response, reason = http.get(context.installerUrl)
+        local response, reason =
+            http.get(context.installerUrl)
+
         if not response then
             print("")
             print("Download failed:")
             print(tostring(reason))
-            ui.pause()
-            return
+            return false, tostring(reason)
         end
 
         local contents = response.readAll()
@@ -83,26 +87,51 @@ function application.run(context)
         if not contents or #contents == 0 then
             print("")
             print("Installer download was empty.")
-            ui.pause()
-            return
+            return false, "Installer download was empty"
         end
 
         if fs.exists(INSTALLER_LOCAL) then
             fs.delete(INSTALLER_LOCAL)
         end
 
-        local file = fs.open(INSTALLER_LOCAL, "w")
+        local file =
+            fs.open(
+                INSTALLER_LOCAL,
+                "w"
+            )
+
         if not file then
             print("")
             print("Could not write installer file.")
-            ui.pause()
-            return
+            return false, "Could not write installer file"
         end
 
-        file.write(contents)
+        local written, writeReason =
+            pcall(
+                function()
+                    file.write(contents)
+                end
+            )
+
         file.close()
 
-        print("Downloaded " .. tostring(#contents) .. " bytes.")
+        if not written then
+            if fs.exists(INSTALLER_LOCAL) then
+                fs.delete(INSTALLER_LOCAL)
+            end
+
+            print("")
+            print("Could not write installer:")
+            print(tostring(writeReason))
+
+            return false, tostring(writeReason)
+        end
+
+        print(
+            "Downloaded "
+            .. tostring(#contents)
+            .. " bytes."
+        )
         print("Starting installer...")
         sleep(0.3)
 
@@ -114,18 +143,34 @@ function application.run(context)
                 INSTALLER_LOCAL
             )
 
+        if fs.exists(INSTALLER_LOCAL) then
+            fs.delete(INSTALLER_LOCAL)
+        end
+
         if completed then
-            if fs.exists(INSTALLER_LOCAL) then
-                fs.delete(INSTALLER_LOCAL)
-            end
+            return true
+        end
+
+        ui.configure(settings)
+        return false, "Installer returned an error"
+    end
+
+    local function installOrUpdate()
+        local completed =
+            runInstaller(
+                "Install or update MCNet"
+            )
+
+        if completed then
             print("")
             print("Update complete. Rebooting...")
             sleep(1)
             os.reboot()
         end
 
-        ui.configure(settings)
-        ui.pause("Installer returned an error. Press Enter...")
+        ui.pause(
+            "Installer returned an error. Press Enter..."
+        )
     end
 
     local function chooseValue(title, values, current, displayFunction)
@@ -224,10 +269,133 @@ function application.run(context)
             return
         end
 
+        local oldType =
+            string.upper(
+                tostring(
+                    current.type
+                    or "UNKNOWN"
+                )
+            )
+
+        local newType =
+            string.upper(
+                tostring(
+                    proposed.type
+                    or "UNKNOWN"
+                )
+            )
+
+        local roleChanged =
+            oldType ~= newType
+
         if os.setComputerLabel then
             os.setComputerLabel(proposed.systemName)
         end
 
+        if roleChanged then
+            print("")
+            print(
+                "Device role changed:"
+            )
+            print(
+                oldType
+                .. " -> "
+                .. newType
+            )
+            print("")
+            print(
+                "MCNet will now sync the files required for "
+                .. newType
+                .. "."
+            )
+            print(
+                "Saved .mcnet configuration will be kept."
+            )
+            sleep(0.5)
+
+            local synced, syncReason =
+                runInstaller(
+                    "Syncing "
+                    .. newType
+                    .. " package"
+                )
+
+            if synced then
+                print("")
+                print(
+                    "Role package synchronised."
+                )
+                print(
+                    "Rebooting into "
+                    .. newType
+                    .. "..."
+                )
+                sleep(1)
+                os.reboot()
+            end
+
+            -- The package sync did not complete. Restore the previous device
+            -- identity so an accidental reboot still boots the old role whose
+            -- files are known to be present. The installer removes obsolete
+            -- role code only after a successful modular install.
+            local restored, restoreReason =
+                deviceModule.save(
+                    current,
+                    nil,
+                    VERSION,
+                    PROTOCOL
+                )
+
+            if restored
+                and os.setComputerLabel then
+
+                os.setComputerLabel(
+                    current.systemName
+                )
+            end
+
+            ui.configure(settings)
+            ui.drawHeader(
+                "Role change cancelled",
+                getDevice(),
+                VERSION
+            )
+            print("")
+
+            if restored then
+                print(
+                    "Package sync failed, so the previous role was restored."
+                )
+                print("")
+                print(
+                    "Role: "
+                    .. oldType
+                )
+            else
+                print(
+                    "Package sync failed AND the previous role could not be restored."
+                )
+                print("")
+                print(
+                    tostring(
+                        restoreReason
+                        or syncReason
+                        or "Unknown error"
+                    )
+                )
+                print("")
+                print(
+                    "Do not reboot until MCNet is repaired."
+                )
+            end
+
+            ui.pause()
+            ui.configure(settings)
+            return
+        end
+
+        -- No role change: the currently running services can safely accept
+        -- the updated address/name immediately.
         if context.network then
             context.network.setDevice(proposed)
         end
@@ -241,8 +409,10 @@ function application.run(context)
         end
 
         print("")
-        print(proposed.address .. " is now configured.")
-        print("Reboot to apply any device-role change.")
+        print(
+            proposed.address
+            .. " is now configured."
+        )
         ui.pause()
         ui.configure(settings)
     end
@@ -615,15 +785,38 @@ function application.run(context)
                 }
             }
 
+            local installedTests = 0
+
             for _, test in ipairs(tests) do
-                local currentTest = test
+                if fs.exists(test.path) then
+                    local currentTest = test
+                    installedTests =
+                        installedTests + 1
+
+                    table.insert(options, {
+                        label =
+                            "Run "
+                            .. currentTest.label,
+                        compactLabel =
+                            currentTest.compactLabel,
+                        description =
+                            currentTest.path,
+                        action = function()
+                            runTest(currentTest)
+                        end
+                    })
+                end
+            end
+
+            if installedTests == 0 then
                 table.insert(options, {
-                    label = "Run " .. currentTest.label,
-                    compactLabel = currentTest.compactLabel,
-                    description = currentTest.path,
-                    action = function()
-                        runTest(currentTest)
-                    end
+                    label =
+                        "Test package not installed",
+                    compactLabel =
+                        "No tests installed",
+                    description =
+                        "Normal role installs omit developer tests to save disk space.",
+                    disabled = true
                 })
             end
 
@@ -1121,7 +1314,7 @@ function application.run(context)
             {
                 label = "Install or update MCNet",
                 compactLabel = "Install / update",
-                description = "Download the standalone installer, manifest and every listed file.",
+                description = "Sync MCNet core and the files required by this device role.",
                 action = installOrUpdate
             },
             {
