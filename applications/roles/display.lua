@@ -104,6 +104,43 @@ function application.run(context)
         return result
     end
 
+    local function dashboardLabel(id)
+        if displayConfigModule.getLabel then
+            local ok, value =
+                pcall(
+                    displayConfigModule.getLabel,
+                    id
+                )
+
+            if ok and value ~= nil then
+                return tostring(value)
+            end
+        end
+
+        if displayConfigModule.getDashboard then
+            local ok, info =
+                pcall(
+                    displayConfigModule.getDashboard,
+                    id
+                )
+
+            if ok and type(info) == "table" then
+                if info.label ~= nil then
+                    return tostring(info.label)
+                end
+
+                if info.name ~= nil then
+                    return tostring(info.name)
+                end
+            end
+        end
+
+        return tostring(
+            id
+            or "UNASSIGNED"
+        )
+    end
+
     local function saveConfig()
         local saved, reason =
             displayConfigModule.save(
@@ -417,7 +454,7 @@ function application.run(context)
                 {
                     label =
                         "Dashboard: "
-                        .. displayConfigModule.getLabel(
+                        .. dashboardLabel(
                             profile.dashboard
                         ),
                     compactLabel = "Dashboard",
@@ -627,7 +664,7 @@ function application.run(context)
                             .. "  "
                             .. (
                                 profile
-                                and displayConfigModule.getLabel(
+                                and dashboardLabel(
                                     profile.dashboard
                                 )
                                 or "UNASSIGNED"
