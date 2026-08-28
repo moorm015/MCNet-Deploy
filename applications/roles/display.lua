@@ -1,7 +1,7 @@
 -- MCNet configurable multi-monitor display-wall application
 
 -- Version 0.9.2
--- Banner timing revision: 2026-08-28
+-- Banner timing + word-wrap revision: 2026-08-28
 
 --
 
@@ -124,10 +124,11 @@ function application.run(context)
     -- Banner timing is deliberately independent from the display-wall refresh.
     -- A station sign may redraw every couple of seconds without selecting a
     -- new message every time it redraws.
-    local BANNER_MIN_HOLD_SECONDS = 18
-    local BANNER_SCROLL_CHARS_PER_SECOND = 1.25
-    local BANNER_START_PAUSE_SECONDS = 3
-    local BANNER_END_PAUSE_SECONDS = 3
+    --
+    -- Station-name boards use word wrapping rather than marquee scrolling:
+    -- passengers should be able to glance at the board and read the complete
+    -- notice without waiting for missing text to move into view.
+    local BANNER_HOLD_SECONDS = 18
 
     -- One state per station means multiple signs for the same station remain
     -- synchronised while different stations can be at different points in the
@@ -2060,48 +2061,7 @@ function application.run(context)
         ]
     end
 
-    local function bannerDuration(
-        message,
-        available
-    )
-        message =
-            tostring(
-                message or ""
-            )
-
-        available =
-            math.max(
-                1,
-                tonumber(available)
-                or 1
-            )
-
-        if #message <= available then
-            return BANNER_MIN_HOLD_SECONDS
-        end
-
-        local scrollDistance =
-            math.max(
-                0,
-                #message - available
-            )
-
-        local scrollSeconds =
-            scrollDistance
-            / BANNER_SCROLL_CHARS_PER_SECOND
-
-        return math.max(
-            BANNER_MIN_HOLD_SECONDS,
-            BANNER_START_PAUSE_SECONDS
-                + scrollSeconds
-                + BANNER_END_PAUSE_SECONDS
-        )
-    end
-
-    local function getBannerFrame(
-        profile,
-        available
-    )
+    local function getBannerMessage(profile)
         local stationKey =
             tostring(
                 profile
@@ -2120,18 +2080,13 @@ function application.run(context)
         if not state
             or now >= state.expiresAt then
 
-            local message =
-                nextBannerMessage()
-
             state = {
-                message = message,
-                startedAt = now,
+                message =
+                    nextBannerMessage(),
+
                 expiresAt =
                     now
-                    + bannerDuration(
-                        message,
-                        available
-                    )
+                    + BANNER_HOLD_SECONDS
             }
 
             bannerStates[
@@ -2139,54 +2094,209 @@ function application.run(context)
             ] = state
         end
 
-        local message =
+        return tostring(
+            state.message
+            or ""
+        )
+    end
+
+    local function splitLongWord(
+        word,
+        width
+    )
+        local parts = {}
+
+        word =
             tostring(
-                state.message or ""
+                word or ""
             )
 
-        if #message <= available then
-            return message
-        end
-
-        local maximumOffset =
+        width =
             math.max(
-                0,
-                #message - available
-            )
-
-        local elapsed =
-            math.max(
-                0,
-                now - state.startedAt
-            )
-
-        local offset = 0
-
-        if elapsed
-            > BANNER_START_PAUSE_SECONDS then
-
-            offset =
+                1,
                 math.floor(
-                    (
-                        elapsed
-                        - BANNER_START_PAUSE_SECONDS
-                    )
-                    * BANNER_SCROLL_CHARS_PER_SECOND
+                    tonumber(width)
+                    or 1
+                )
+            )
+
+        while #word > width do
+            parts[#parts + 1] =
+                string.sub(
+                    word,
+                    1,
+                    width
+                )
+
+            word =
+                string.sub(
+                    word,
+                    width + 1
                 )
         end
 
-        if offset > maximumOffset then
-            offset = maximumOffset
+        if word ~= "" then
+            parts[#parts + 1] =
+                word
         end
 
-        -- A long message starts fully readable at its first character, then
-        -- moves left slowly until the final characters are visible. It pauses
-        -- at both ends and never wraps back into itself.
-        return string.sub(
+        return parts
+    end
+
+    local function wrapBannerMessage(
+        message,
+        width,
+        maxLines
+    )
+        message =
+            tostring(
+                message or ""
+            )
+
+        message =
+            string.gsub(
+                message,
+                "%s+",
+                " "
+            )
+
+        message =
+            string.gsub(
+                message,
+                "^%s+",
+                ""
+            )
+
+        message =
+            string.gsub(
+                message,
+                "%s+$",
+                ""
+            )
+
+        width =
+            math.max(
+                1,
+                math.floor(
+                    tonumber(width)
+                    or 1
+                )
+            )
+
+        maxLines =
+            math.max(
+                1,
+                math.floor(
+                    tonumber(maxLines)
+                    or 1
+                )
+            )
+
+        if message == "" then
+            return {
+                ""
+            }
+        end
+
+        local words = {}
+
+        for word in string.gmatch(
             message,
-            offset + 1,
-            offset + available
-        )
+            "%S+"
+        ) do
+            if #word <= width then
+                words[#words + 1] =
+                    word
+            else
+                local parts =
+                    splitLongWord(
+                        word,
+                        width
+                    )
+
+                for _, part in ipairs(parts) do
+                    words[#words + 1] =
+                        part
+                end
+            end
+        end
+
+        local lines = {}
+        local current = ""
+
+        for _, word in ipairs(words) do
+            local candidate =
+                current == ""
+                and word
+                or (
+                    current
+                    .. " "
+                    .. word
+                )
+
+            if #candidate <= width then
+                current =
+                    candidate
+            else
+                if current ~= "" then
+                    lines[#lines + 1] =
+                        current
+                end
+
+                current =
+                    word
+            end
+        end
+
+        if current ~= "" then
+            lines[#lines + 1] =
+                current
+        end
+
+        if #lines <= maxLines then
+            return lines
+        end
+
+        -- The normal banner library is deliberately written to fit two lines
+        -- on our station monitors. If a future live notice is exceptionally
+        -- long, keep as much readable text as possible and mark truncation
+        -- rather than reverting to a fast horizontal marquee.
+        local result = {}
+
+        for index = 1, maxLines do
+            result[index] =
+                lines[index]
+                or ""
+        end
+
+        local final =
+            result[maxLines]
+            or ""
+
+        if width >= 4 then
+            final =
+                string.sub(
+                    final,
+                    1,
+                    math.max(
+                        1,
+                        width - 3
+                    )
+                )
+                .. "..."
+        else
+            final =
+                string.sub(
+                    final,
+                    1,
+                    width
+                )
+        end
+
+        result[maxLines] =
+            final
+
+        return result
     end
 
     local function drawStationSign(
@@ -2301,29 +2411,54 @@ function application.run(context)
 
                     1,
 
-                    width - 2
+                    width - 4
 
                 )
 
             local message =
 
-                getBannerFrame(
+                getBannerMessage(
 
-                    profile,
-
-                    available
+                    profile
 
                 )
 
-            centre(
+            local wrapped =
 
-                height - 1,
+                wrapBannerMessage(
 
-                message,
+                    message,
 
-                colors.yellow
+                    available,
 
-            )
+                    2
+
+                )
+
+            local firstRow =
+
+                height
+                - #wrapped
+
+            for index, bannerLine in ipairs(
+
+                wrapped
+
+            ) do
+
+                centre(
+
+                    firstRow
+                    + index
+                    - 1,
+
+                    bannerLine,
+
+                    colors.yellow
+
+                )
+
+            end
 
         end
 
