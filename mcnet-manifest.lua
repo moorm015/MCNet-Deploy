@@ -1,5 +1,5 @@
 -- MCNet deployment manifest
--- Version 0.9.6
+-- Version 0.9.8
 -- Modular package layout
 --
 -- The installer always installs packages.default, then adds the package set
@@ -13,7 +13,7 @@
 -- retained when a computer changes role.
 return {
     name = "MCNet",
-    version = "0.9.6",
+    version = "0.9.8",
     protocol = 1,
     entrypoint = "kernel/boot.lua",
     packages = {
@@ -327,6 +327,11 @@ return {
             }
         },
         {
+            source = "services/trains/block_controller.lua",
+            destination = "services/trains/block_controller.lua",
+            packages = "TESTS"
+        },
+        {
             source = "applications/roles/station.lua",
             destination = "applications/roles/station.lua",
             packages = "STATION"
@@ -394,6 +399,11 @@ return {
         {
             source = "tests/trains/station_controller_test.lua",
             destination = "tests/trains/station_controller_test.lua",
+            packages = "TESTS"
+        },
+        {
+            source = "tests/trains/block_controller_test.lua",
+            destination = "tests/trains/block_controller_test.lua",
             packages = "TESTS"
         },
         {
