@@ -1,7 +1,7 @@
 -- MCNet configurable multi-monitor display-wall application
 
 -- Version 0.9.2
--- Banner word-wrap + graphical rail-map revision: 2026-08-29
+-- Banner word-wrap + thin graphical rail-map revision: 2026-08-29
 
 --
 
@@ -3241,7 +3241,11 @@ function application.run(context)
                             profile.station
                             or "CENTRAL",
 
-                        showLegend = true
+                        showLegend = true,
+
+                        lineStyle = "thin",
+
+                        fullNames = true
                     }
 
                 )

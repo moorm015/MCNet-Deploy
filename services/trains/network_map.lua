@@ -1,251 +1,164 @@
--- MCNet graphical railway network map
--- Version 0.9.3
---
+-- MCNet railway network map renderer
+-- Version 0.9.4
 -- ComputerCraft 1.75 / CraftOS 1.7 compatible.
 --
--- This module owns the PASSENGER MAP LAYOUT used by DISPLAY computers.
--- It deliberately does not represent exact Minecraft geography. It is a
--- schematic tube-style diagram matching the physical railway topology.
+-- This is the compact, thin-line renderer for normal station displays.
+-- It keeps full station names and follows the approved schematic:
 --
--- Visual design locked from the 2026-08-29 sketch:
+--   * Yellow Circle Line forms the tilted diamond/parallelogram.
+--   * Pink Honey Line runs parallel outside the left/bottom edge and
+--     BYPASSES Atoll Island.
+--   * Blue + Green + Yellow share the Central -> Laboratories corridor.
+--   * Blue branches first to Spa Village -> New Egypt.
+--   * Green continues beside Yellow and branches second to
+--     Half-Wall -> Eastern Village.
+--   * Yellow alone continues to Laboratories.
+--   * Red Electric Line runs ACME -> Central Station.
+--   * Orange Little Mexico route runs Eastern Village -> Little Mexico.
 --
---                     ACME -------- Electric -------- CENTRAL
---                                                 /   | | |
---                    BEE GARDENS ----------------     | | |
---                      /                               | | |
---          Honey ---- /                                | | +-- Central Line
---                    /                                 | +---- Eastern Line
---              ATOLL ISLAND                            +------ Circle Line
---                    \                                     /
---          Honey -----\---------------- LABORATORIES --+
+-- Route lines are deliberately drawn as COLOURED FOREGROUND strokes rather
+-- than full-cell background blocks. A ComputerCraft monitor cell cannot be
+-- subdivided, so this is the only reliable way on classic ComputerCraft to
+-- make a route visually thinner than one complete character cell.
 --
--- Both passenger branches leave the shared CENTRAL -> LABORATORIES side:
---   * Central Line separates first and runs to Spa Village -> New Egypt.
---   * Eastern Line continues beside the Circle Line, then separates and runs
---     to Half-Wall -> Eastern Village.
---   * Circle Line continues to Laboratories.
---
--- Honey Line runs parallel to the left/bottom Circle corridor but BYPASSES
--- Atoll Island: there is no Honey Line stop at Atoll.
---
--- Lines are drawn as FILLED monitor cells, not "-", "/", "|" text rails.
--- Station labels are still text because that is the clearest option within
--- native ComputerCraft monitor limitations.
+-- Station markers and the legend still use compact colour/character markers.
 
-local module = {}
+local map = {}
 
-local VERSION = "0.9.3"
+local VERSION = "0.9.4"
+local REF_W = 1200
+local REF_H = 520
 
--- Reference coordinates are scaled into the currently redirected terminal.
--- The layout is intentionally wide and only moderately tall.
-local REFERENCE_WIDTH = 1000
-local REFERENCE_HEIGHT = 560
-
-local function colour(name, fallback)
+local function ccColour(name, fallback)
     if colors and colors[name] then
         return colors[name]
     end
-
     return fallback
 end
 
--- These colours match the latest user sketch rather than the older rail_config
--- palette. We can synchronise rail_config separately once this map is approved.
+local BLACK = ccColour("black", 32768)
+local WHITE = ccColour("white", 1)
+local LIGHT_GRAY = ccColour("lightGray", 256)
+local LIME = ccColour("lime", 32)
+local YELLOW = ccColour("yellow", 16)
+
 local LINES = {
     CIRCLE = {
         id = "CIRCLE",
         name = "Circle Line",
-        shortName = "Circle",
-        colour = colour("yellow", 16)
+        legend = "Circle",
+        colour = ccColour("yellow", 16)
     },
-
     HONEY_LINE = {
         id = "HONEY_LINE",
         name = "Honey Line",
-        shortName = "Honey",
-        colour = colour("pink", 64)
+        legend = "Honey",
+        colour = ccColour("pink", 64)
     },
-
     CENTRAL_LINE = {
         id = "CENTRAL_LINE",
         name = "Central Line",
-        shortName = "Central",
-        colour = colour("lightBlue", 8)
+        legend = "Central",
+        colour = ccColour("lightBlue", 8)
     },
-
     EASTERN_LINE = {
         id = "EASTERN_LINE",
         name = "Eastern Line",
-        shortName = "Eastern",
-        -- Lime is deliberately used as the brighter ComputerCraft "green"
-        -- so it remains readable against a black monitor.
-        colour = colour("lime", 32)
+        legend = "Eastern",
+        colour = ccColour("lime", 32)
     },
-
     LITTLE_MEXICO_EXPRESS = {
         id = "LITTLE_MEXICO_EXPRESS",
         name = "Little Mexico Express",
-        shortName = "Mexico",
-        colour = colour("orange", 2)
+        legend = "Mexico",
+        colour = ccColour("orange", 2)
     },
-
     ACME_ELECTRIC = {
         id = "ACME_ELECTRIC",
         name = "Electric Line",
-        shortName = "Electric",
-        colour = colour("red", 16384)
+        legend = "Electric",
+        colour = ccColour("red", 16384)
     }
 }
 
 local LINE_ORDER = {
-    "HONEY_LINE",
     "CIRCLE",
-    "ACME_ELECTRIC",
+    "HONEY_LINE",
     "CENTRAL_LINE",
     "EASTERN_LINE",
-    "LITTLE_MEXICO_EXPRESS"
+    "LITTLE_MEXICO_EXPRESS",
+    "ACME_ELECTRIC"
 }
 
--- Passenger stations.
---
--- IDs deliberately match rail_config.lua even where the passenger-facing label
--- is slightly different from the old config name.
+-- The labels deliberately leave more margin than v0.9.3 so full station names
+-- remain readable on a normal 3x2/large station monitor.
 local STATIONS = {
     ACME_ESC = {
         id = "ACME_ESC",
         name = "ACME",
-        shortName = "ACME",
-        x = 72,
-        y = 78,
+        x = 70, y = 65,
         terminus = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = -1
-        }
+        label = { anchor = "right", dx = 2, dy = -1 }
     },
-
     BEE_GARDENS = {
         id = "BEE_GARDENS",
         name = "Bee Gardens",
-        shortName = "Bees",
-        x = 258,
-        y = 160,
+        x = 260, y = 150,
         interchange = true,
-        label = {
-            anchor = "left",
-            dx = -2,
-            dy = -1
-        }
+        label = { anchor = "left", dx = -2, dy = -1 }
     },
-
     CENTRAL = {
         id = "CENTRAL",
         name = "Central Station",
-        shortName = "Central",
-        x = 565,
-        y = 160,
+        x = 600, y = 150,
         interchange = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = -1
-        }
+        label = { anchor = "right", dx = 2, dy = -1 }
     },
-
     ATOLL_REEF = {
         id = "ATOLL_REEF",
         name = "Atoll Island",
-        shortName = "Atoll",
-        x = 155,
-        y = 455,
-        label = {
-            anchor = "left",
-            dx = -2,
-            dy = 1
-        }
+        x = 170, y = 430,
+        label = { anchor = "left", dx = -2, dy = 1 }
     },
-
     LABORATORIES = {
         id = "LABORATORIES",
         name = "Laboratories",
-        shortName = "Labs",
-        x = 465,
-        y = 455,
+        x = 480, y = 430,
         interchange = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = 1
-        }
+        label = { anchor = "right", dx = 2, dy = 1 }
     },
-
     THE_SPA = {
         id = "THE_SPA",
         name = "Spa Village",
-        shortName = "Spa",
-        x = 720,
-        y = 245,
-        label = {
-            anchor = "below",
-            dx = 0,
-            dy = 1
-        }
+        x = 760, y = 235,
+        label = { anchor = "below", dx = 0, dy = 1 }
     },
-
     NEW_EGYPT = {
         id = "NEW_EGYPT",
         name = "New Egypt",
-        shortName = "Egypt",
-        x = 940,
-        y = 245,
+        x = 1020, y = 235,
         terminus = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = 0
-        }
+        label = { anchor = "right", dx = 2, dy = 0 }
     },
-
     HALF_WALL = {
         id = "HALF_WALL",
         name = "Half-Wall",
-        shortName = "Half-Wall",
-        x = 690,
-        y = 355,
-        label = {
-            anchor = "above",
-            dx = 0,
-            dy = -1
-        }
+        x = 710, y = 335,
+        label = { anchor = "above", dx = 0, dy = -1 }
     },
-
     EASTERN_VILLAGE = {
         id = "EASTERN_VILLAGE",
         name = "Eastern Village",
-        shortName = "Eastern",
-        x = 850,
-        y = 355,
+        x = 900, y = 335,
         interchange = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = 0
-        }
+        label = { anchor = "right", dx = 2, dy = 0 }
     },
-
     LITTLE_MEXICO = {
         id = "LITTLE_MEXICO",
         name = "Little Mexico",
-        shortName = "Mexico",
-        x = 935,
-        y = 480,
+        x = 1020, y = 455,
         terminus = true,
-        label = {
-            anchor = "right",
-            dx = 2,
-            dy = 0
-        }
+        label = { anchor = "right", dx = 2, dy = 0 }
     }
 }
 
@@ -262,973 +175,397 @@ local STATION_ORDER = {
     "LITTLE_MEXICO"
 }
 
--- Junctions are NOT passenger stops. They only provide geometry for the shared
--- right-hand corridor and branch separation.
-local POINTS = {
-    -- Yellow Circle centre-line waypoints.
-    SPA_JUNCTION_YELLOW = {
-        x = 540,
-        y = 245
-    },
+-- Yellow centre-line points on the Central -> Laboratories side.
+local P = {
+    SPA_Y = { x = 564, y = 234 },
+    EAST_Y = { x = 522, y = 332 },
 
-    EAST_JUNCTION_YELLOW = {
-        x = 505,
-        y = 355
-    },
+    -- Green sits immediately to the outside/right of Yellow.
+    SPA_G = { x = 586, y = 240 },
+    EAST_G = { x = 544, y = 338 },
 
-    -- Blue runs to the RIGHT of yellow from Central to the Spa junction.
-    SPA_JUNCTION_BLUE = {
-        x = 552,
-        y = 245
-    },
+    -- Blue is the outermost shared route and leaves first.
+    SPA_B = { x = 608, y = 246 },
 
-    -- Green runs to the LEFT of yellow down the shared corridor.
-    SPA_JUNCTION_GREEN = {
-        x = 528,
-        y = 245
-    },
+    -- Fan-out points make the three lines visibly separate just below Central.
+    GREEN_FAN = { x = 606, y = 178 },
+    BLUE_FAN = { x = 626, y = 184 },
 
-    EAST_JUNCTION_GREEN = {
-        x = 493,
-        y = 355
-    },
+    -- Honey is outside the Circle line and deliberately misses Atoll.
+    HONEY_TOP = { x = 242, y = 176 },
+    HONEY_LEFT = { x = 132, y = 414 },
+    HONEY_BYPASS = { x = 132, y = 466 },
+    HONEY_BOTTOM_L = { x = 195, y = 470 },
+    HONEY_BOTTOM_R = { x = 445, y = 470 },
 
-    -- Honey line sits outside the Circle line around Atoll.
-    HONEY_LEFT_TOP = {
-        x = 238,
-        y = 182
-    },
+    -- Electric route follows the user's horizontal top line then drops to Central.
+    ELECTRIC_BEND = { x = 590, y = 65 },
 
-    HONEY_LEFT_BOTTOM = {
-        x = 125,
-        y = 448
-    },
-
-    HONEY_ATOLL_BYPASS = {
-        x = 132,
-        y = 490
-    },
-
-    HONEY_BOTTOM_LEFT = {
-        x = 190,
-        y = 510
-    },
-
-    HONEY_BOTTOM_RIGHT = {
-        x = 430,
-        y = 510
-    },
-
-    -- Electric route is mainly horizontal, then bends down into Central.
-    ELECTRIC_BEND = {
-        x = 445,
-        y = 78
-    },
-
-    -- Little Mexico route mirrors the user's angled-down then horizontal sketch.
-    MEXICO_BEND = {
-        x = 800,
-        y = 480
-    }
+    -- Little Mexico keeps the angled-down then horizontal shape.
+    MEXICO_BEND = { x = 850, y = 455 }
 }
 
 local function stationPoint(id)
-    local station = STATIONS[id]
-
-    return {
-        x = station.x,
-        y = station.y
-    }
+    local s = STATIONS[id]
+    return { x = s.x, y = s.y }
 end
 
--- Each route is an explicit polyline. This is intentional: the graphical map
--- should remain faithful to the approved schematic even if rail_config map
--- coordinates change for some other purpose.
 local ROUTES = {
     {
         line = "CIRCLE",
         points = {
             stationPoint("BEE_GARDENS"),
             stationPoint("CENTRAL"),
-            POINTS.SPA_JUNCTION_YELLOW,
-            POINTS.EAST_JUNCTION_YELLOW,
+            P.SPA_Y,
+            P.EAST_Y,
             stationPoint("LABORATORIES"),
             stationPoint("ATOLL_REEF"),
             stationPoint("BEE_GARDENS")
         }
     },
-
     {
         line = "HONEY_LINE",
         points = {
             stationPoint("BEE_GARDENS"),
-            POINTS.HONEY_LEFT_TOP,
-            POINTS.HONEY_LEFT_BOTTOM,
-            POINTS.HONEY_ATOLL_BYPASS,
-            POINTS.HONEY_BOTTOM_LEFT,
-            POINTS.HONEY_BOTTOM_RIGHT,
+            P.HONEY_TOP,
+            P.HONEY_LEFT,
+            P.HONEY_BYPASS,
+            P.HONEY_BOTTOM_L,
+            P.HONEY_BOTTOM_R,
             stationPoint("LABORATORIES")
         }
     },
-
     {
         line = "CENTRAL_LINE",
         points = {
             stationPoint("CENTRAL"),
-
-            -- Shared corridor: blue alongside yellow and green.
-            {
-                x = 572,
-                y = 175
-            },
-            POINTS.SPA_JUNCTION_BLUE,
-
-            -- Blue separates FIRST.
-            {
-                x = 610,
-                y = 245
-            },
+            P.BLUE_FAN,
+            P.SPA_B,
+            { x = 665, y = 246 },
             stationPoint("THE_SPA"),
             stationPoint("NEW_EGYPT")
         }
     },
-
     {
         line = "EASTERN_LINE",
         points = {
             stationPoint("CENTRAL"),
-
-            -- Shared corridor: green remains alongside the Circle after the
-            -- Central Line has branched away.
-            {
-                x = 552,
-                y = 174
-            },
-            POINTS.SPA_JUNCTION_GREEN,
-            POINTS.EAST_JUNCTION_GREEN,
-
-            -- Green separates SECOND.
-            {
-                x = 545,
-                y = 355
-            },
+            P.GREEN_FAN,
+            P.SPA_G,
+            P.EAST_G,
+            { x = 600, y = 338 },
             stationPoint("HALF_WALL"),
             stationPoint("EASTERN_VILLAGE")
         }
     },
-
     {
         line = "LITTLE_MEXICO_EXPRESS",
         points = {
             stationPoint("EASTERN_VILLAGE"),
-            POINTS.MEXICO_BEND,
+            P.MEXICO_BEND,
             stationPoint("LITTLE_MEXICO")
         }
     },
-
     {
         line = "ACME_ELECTRIC",
         points = {
             stationPoint("ACME_ESC"),
-            POINTS.ELECTRIC_BEND,
+            P.ELECTRIC_BEND,
             stationPoint("CENTRAL")
         }
     }
 }
 
-local function copy(value)
-    if type(value) ~= "table" then
-        return value
-    end
-
-    local result = {}
-
-    for key, item in pairs(value) do
-        result[key] = copy(item)
-    end
-
-    return result
-end
-
-local function setText(colourValue)
+local function setText(colour)
     if term.setTextColor then
-        term.setTextColor(colourValue)
-    elseif term.setTextColour then
-        term.setTextColour(colourValue)
+        term.setTextColor(colour)
+    else
+        term.setTextColour(colour)
     end
 end
 
-local function setBackground(colourValue)
+local function setBackground(colour)
     if term.setBackgroundColor then
-        term.setBackgroundColor(colourValue)
-    elseif term.setBackgroundColour then
-        term.setBackgroundColour(colourValue)
+        term.setBackgroundColor(colour)
+    else
+        term.setBackgroundColour(colour)
     end
 end
 
-local function safeWrite(text)
-    write(
-        tostring(
-            text or ""
-        )
-    )
+local function safeWrite(value)
+    term.write(tostring(value or ""))
 end
 
-local function paintCell(
-    x,
-    y,
-    background
-)
-    local width, height =
-        term.getSize()
+local function writeAt(x, y, text, colour)
+    local w, h = term.getSize()
+    x = math.floor(tonumber(x) or 1)
+    y = math.floor(tonumber(y) or 1)
+    text = tostring(text or "")
 
-    x =
-        math.floor(
-            tonumber(x) or 0
-        )
-
-    y =
-        math.floor(
-            tonumber(y) or 0
-        )
-
-    if x < 1
-        or x > width
-        or y < 1
-        or y > height then
-
+    if y < 1 or y > h or text == "" then
         return
     end
 
-    term.setCursorPos(
-        x,
-        y
-    )
+    if x < 1 then
+        text = string.sub(text, 2 - x)
+        x = 1
+    end
 
-    setBackground(
-        background
-    )
+    if x > w or text == "" then
+        return
+    end
 
-    safeWrite(" ")
+    if #text > (w - x + 1) then
+        text = string.sub(text, 1, w - x + 1)
+    end
+
+    setBackground(BLACK)
+    setText(colour or WHITE)
+    term.setCursorPos(x, y)
+    safeWrite(text)
 end
 
-local function drawFilledLine(
-    x1,
-    y1,
-    x2,
-    y2,
-    colourValue
-)
+-- Draw one thin coloured route stroke.
+--
+-- Classic ComputerCraft only gives us one background colour per character cell.
+-- Using a foreground stroke allows the coloured route to occupy only the glyph
+-- itself, which is visibly much thinner than the v0.9.3 filled-cell line.
+local function strokeGlyph(x1, y1, x2, y2)
+    local dx = x2 - x1
+    local dy = y2 - y1
+
+    if math.abs(dy) <= 0 then
+        return "-"
+    end
+
+    if math.abs(dx) <= 0 then
+        return "|"
+    end
+
+    if (dx > 0 and dy > 0) or (dx < 0 and dy < 0) then
+        return "\\"
+    end
+
+    return "/"
+end
+
+local function drawThinSegment(x1, y1, x2, y2, colour)
     x1 = math.floor(x1)
     y1 = math.floor(y1)
     x2 = math.floor(x2)
     y2 = math.floor(y2)
 
-    local dx =
-        math.abs(
-            x2 - x1
-        )
+    local glyph = strokeGlyph(x1, y1, x2, y2)
+    local dx = math.abs(x2 - x1)
+    local dy = math.abs(y2 - y1)
+    local sx = x1 < x2 and 1 or -1
+    local sy = y1 < y2 and 1 or -1
+    local err = dx - dy
+    local x, y = x1, y1
+    local w, h = term.getSize()
 
-    local dy =
-        math.abs(
-            y2 - y1
-        )
-
-    local sx =
-        x1 < x2
-        and 1
-        or -1
-
-    local sy =
-        y1 < y2
-        and 1
-        or -1
-
-    local err =
-        dx - dy
-
-    local x =
-        x1
-
-    local y =
-        y1
+    setBackground(BLACK)
+    setText(colour)
 
     while true do
-        paintCell(
-            x,
-            y,
-            colourValue
-        )
+        if x >= 1 and x <= w and y >= 1 and y <= h then
+            term.setCursorPos(x, y)
+            safeWrite(glyph)
+        end
 
-        if x == x2
-            and y == y2 then
-
+        if x == x2 and y == y2 then
             break
         end
 
-        local e2 =
-            2 * err
+        local e2 = 2 * err
 
         if e2 > -dy then
-            err =
-                err - dy
-
-            x =
-                x + sx
+            err = err - dy
+            x = x + sx
         end
 
         if e2 < dx then
-            err =
-                err + dx
-
-            y =
-                y + sy
+            err = err + dx
+            y = y + sy
         end
     end
 end
 
-local function drawPath(
-    points,
-    colourValue,
-    transform
-)
-    for index = 1, #points - 1 do
-        local x1, y1 =
-            transform(
-                points[index].x,
-                points[index].y
-            )
-
-        local x2, y2 =
-            transform(
-                points[index + 1].x,
-                points[index + 1].y
-            )
-
-        drawFilledLine(
-            x1,
-            y1,
-            x2,
-            y2,
-            colourValue
-        )
-    end
-end
-
-local function writeClipped(
-    x,
-    y,
-    text,
-    colourValue
-)
-    local width, height =
-        term.getSize()
-
-    if y < 1
-        or y > height then
-
+local function drawRoute(route, transform)
+    local info = LINES[route.line]
+    if not info then
         return
     end
 
-    text =
-        tostring(
-            text or ""
-        )
+    for i = 1, #route.points - 1 do
+        local a = route.points[i]
+        local b = route.points[i + 1]
+        local x1, y1 = transform(a.x, a.y)
+        local x2, y2 = transform(b.x, b.y)
 
-    if x < 1 then
-        text =
-            string.sub(
-                text,
-                2 - x
-            )
-
-        x = 1
-    end
-
-    if x > width
-        or text == "" then
-
-        return
-    end
-
-    local available =
-        width - x + 1
-
-    if #text > available then
-        text =
-            string.sub(
-                text,
-                1,
-                available
-            )
-    end
-
-    setBackground(
-        colors.black
-    )
-
-    setText(
-        colourValue
-        or colors.white
-    )
-
-    term.setCursorPos(
-        x,
-        y
-    )
-
-    safeWrite(text)
-end
-
-local function drawCompactStation(
-    x,
-    y,
-    selected
-)
-    setBackground(
-        colors.black
-    )
-
-    setText(
-        selected
-        and colors.lime
-        or colors.white
-    )
-
-    term.setCursorPos(
-        x,
-        y
-    )
-
-    safeWrite(
-        selected
-        and "@"
-        or "O"
-    )
-end
-
-local function drawLargeStation(
-    x,
-    y,
-    selected,
-    interchange,
-    terminus
-)
-    -- Five filled monitor cells approximate a circular/diamond roundel:
-    --
-    --    #
-    --   # #
-    --    #
-    --
-    -- The centre remains black so route colours visibly run into the marker.
-    local ringColour =
-        selected
-        and colors.lime
-        or colors.white
-
-    paintCell(
-        x,
-        y - 1,
-        ringColour
-    )
-
-    paintCell(
-        x - 1,
-        y,
-        ringColour
-    )
-
-    paintCell(
-        x + 1,
-        y,
-        ringColour
-    )
-
-    paintCell(
-        x,
-        y + 1,
-        ringColour
-    )
-
-    paintCell(
-        x,
-        y,
-        colors.black
-    )
-
-    -- Interchanges receive one extra white/selected pixel to make the marker
-    -- visually heavier without consuming a huge amount of map space.
-    if interchange then
-        paintCell(
-            x + 1,
-            y + 1,
-            ringColour
-        )
-    elseif terminus then
-        setBackground(
-            colors.black
-        )
-
-        setText(
-            ringColour
-        )
-
-        term.setCursorPos(
-            x,
-            y
-        )
-
-        safeWrite("o")
+        drawThinSegment(x1, y1, x2, y2, info.colour)
     end
 end
 
-local function drawLabel(
-    station,
-    x,
-    y,
-    compact,
-    selected
-)
-    local label =
-        compact
-        and (
-            station.shortName
-            or station.name
-        )
-        or station.name
+local function drawStation(station, x, y, selected)
+    local marker = "o"
 
-    local config =
-        station.label
-        or {}
+    if station.interchange or station.terminus then
+        marker = "O"
+    end
 
-    local anchor =
-        config.anchor
-        or "right"
+    if selected then
+        marker = "@"
+    end
 
-    local dx =
-        tonumber(
-            config.dx
-        )
-        or 0
+    writeAt(
+        x,
+        y,
+        marker,
+        selected and LIME or WHITE
+    )
+end
 
-    local dy =
-        tonumber(
-            config.dy
-        )
-        or 0
-
-    local textX =
-        x + dx
-
-    local textY =
-        y + dy
+local function drawLabel(station, x, y, selected)
+    local cfg = station.label or {}
+    local anchor = cfg.anchor or "right"
+    local dx = tonumber(cfg.dx) or 0
+    local dy = tonumber(cfg.dy) or 0
+    local label = station.name
+    local tx = x + dx
+    local ty = y + dy
 
     if anchor == "left" then
-        textX =
-            x
-            - #label
-            + dx
-
+        tx = x - #label + dx
     elseif anchor == "above" then
-        textX =
-            x
-            - math.floor(
-                #label / 2
-            )
-            + dx
-
-        textY =
-            y - 1 + dy
-
+        tx = x - math.floor(#label / 2) + dx
+        ty = y - 1 + dy
     elseif anchor == "below" then
-        textX =
-            x
-            - math.floor(
-                #label / 2
-            )
-            + dx
-
-        textY =
-            y + 1 + dy
-
-    elseif anchor == "right" then
-        textX =
-            x + dx
-
+        tx = x - math.floor(#label / 2) + dx
+        ty = y + 1 + dy
     end
 
-    writeClipped(
-        textX,
-        textY,
+    writeAt(
+        tx,
+        ty,
         label,
-        selected
-        and colors.lime
-        or colors.lightGray
+        selected and LIME or LIGHT_GRAY
     )
 end
 
-local function drawLegend(
-    top,
-    width
-)
-    if width < 55 then
+local function drawLegend(row, width)
+    if width < 44 then
         return 0
     end
 
-    local items = {
-        LINES.CIRCLE,
-        LINES.HONEY_LINE,
-        LINES.CENTRAL_LINE,
-        LINES.EASTERN_LINE,
-        LINES.LITTLE_MEXICO_EXPRESS,
-        LINES.ACME_ELECTRIC
-    }
-
     local x = 2
-    local y = top
-    local rowHeight = 1
+    local y = row
+    local rows = 1
 
-    for _, lineInfo in ipairs(items) do
-        local label =
-            lineInfo.shortName
+    for _, id in ipairs(LINE_ORDER) do
+        local info = LINES[id]
+        local label = info.legend
+        local needed = #label + 5
 
-        local required =
-            #label + 5
-
-        if x + required > width then
+        if x + needed > width then
             x = 2
-            y =
-                y + rowHeight
+            y = y + 1
+            rows = rows + 1
         end
 
-        -- Small filled colour bar.
-        paintCell(
-            x,
-            y,
-            lineInfo.colour
-        )
+        -- A single filled cell makes a clean colour swatch without making
+        -- the route itself chunky.
+        setBackground(info.colour)
+        term.setCursorPos(x, y)
+        safeWrite(" ")
 
-        paintCell(
-            x + 1,
-            y,
-            lineInfo.colour
-        )
-
-        writeClipped(
-            x + 3,
-            y,
-            label,
-            colors.lightGray
-        )
-
-        x =
-            x + required
+        setBackground(BLACK)
+        writeAt(x + 2, y, label, LIGHT_GRAY)
+        x = x + needed
     end
 
-    return y - top + 1
+    return rows
 end
 
-function module.getVersion()
+function map.getVersion()
     return VERSION
 end
 
-function module.getLines()
-    local result = {}
+function map.getStation(id)
+    return STATIONS[tostring(id or "")]
+end
 
-    for _, id in ipairs(LINE_ORDER) do
-        result[#result + 1] =
-            copy(
-                LINES[id]
-            )
+function map.getLine(id)
+    return LINES[tostring(id or "")]
+end
+
+function map.draw(options)
+    options = type(options) == "table" and options or {}
+
+    local width, height = term.getSize()
+
+    if width < 30 or height < 12 then
+        return false, "Monitor too small for rail map"
     end
 
-    return result
-end
-
-function module.getLine(id)
-    id =
-        tostring(
-            id or ""
-        )
-
-    return LINES[id]
-        and copy(
-            LINES[id]
-        )
-        or nil
-end
-
-function module.getStations()
-    local result = {}
-
-    for _, id in ipairs(STATION_ORDER) do
-        result[#result + 1] =
-            copy(
-                STATIONS[id]
-            )
-    end
-
-    return result
-end
-
-function module.getStation(id)
-    id =
-        tostring(
-            id or ""
-        )
-
-    return STATIONS[id]
-        and copy(
-            STATIONS[id]
-        )
-        or nil
-end
-
-function module.getStationLabel(id)
-    local station =
-        STATIONS[
-            tostring(
-                id or ""
-            )
-        ]
-
-    return station
-        and station.name
-        or tostring(id)
-end
-
-function module.getRoutes()
-    return copy(
-        ROUTES
-    )
-end
-
-function module.draw(options)
-    options =
-        type(options) == "table"
-        and options
-        or {}
-
-    local width, height =
-        term.getSize()
-
-    -- Header row 1 is owned by display.lua.
-    if width < 24
-        or height < 10 then
-
-        return false,
-            "Monitor too small for rail map"
-    end
-
-    local selectedStation =
-        tostring(
-            options.selectedStation
-            or "CENTRAL"
-        )
+    local selected = tostring(options.selectedStation or "CENTRAL")
 
     local legendRows = 0
-
-    if options.showLegend ~= false
-        and height >= 17 then
-
-        legendRows =
-            drawLegend(
-                2,
-                width
-            )
+    if options.showLegend ~= false and height >= 16 then
+        legendRows = drawLegend(2, width)
     end
 
-    local mapTop =
-        2 + legendRows
-
-    if legendRows > 0 then
-        mapTop =
-            mapTop + 1
-    end
-
-    local footerRows =
-        height >= 14
-        and 1
-        or 0
-
-    local mapBottom =
-        height
-        - footerRows
-
-    local left =
-        2
-
-    local right =
-        width - 2
-
-    local top =
-        mapTop
-
-    local bottom =
-        mapBottom - 1
+    local top = legendRows > 0 and (3 + legendRows) or 2
+    local bottom = height - 2
+    local left = 2
+    local right = width - 2
 
     if bottom - top < 7 then
         top = 2
         bottom = height - 1
-        footerRows = 0
     end
 
-    local usableWidth =
-        math.max(
-            1,
-            right - left
-        )
+    local usableW = math.max(1, right - left)
+    local usableH = math.max(1, bottom - top)
 
-    local usableHeight =
-        math.max(
-            1,
-            bottom - top
-        )
-
-    local function transform(
-        mapX,
-        mapY
-    )
-        local x =
-            left
-            + math.floor(
-                (
-                    tonumber(mapX)
-                    / REFERENCE_WIDTH
-                )
-                * usableWidth
-            )
-
-        local y =
-            top
-            + math.floor(
-                (
-                    tonumber(mapY)
-                    / REFERENCE_HEIGHT
-                )
-                * usableHeight
-            )
-
+    local function transform(mx, my)
+        local x = left + math.floor((mx / REF_W) * usableW)
+        local y = top + math.floor((my / REF_H) * usableH)
         return x, y
     end
 
-    -- Draw filled route cells first. Station roundels and labels are layered
-    -- over them afterwards, exactly like a tube-map diagram.
+    -- Routes first.
     for _, route in ipairs(ROUTES) do
-        local lineInfo =
-            LINES[
-                route.line
-            ]
-
-        if lineInfo then
-            drawPath(
-                route.points,
-                lineInfo.colour,
-                transform
-            )
-        end
+        drawRoute(route, transform)
     end
 
-    local largeMarkers =
-        width >= 48
-        and height >= 16
-
-    local compactLabels =
-        width < 44
-
+    -- Station markers second.
     for _, id in ipairs(STATION_ORDER) do
-        local station =
-            STATIONS[id]
-
-        local x, y =
-            transform(
-                station.x,
-                station.y
-            )
-
-        local selected =
-            id == selectedStation
-
-        if largeMarkers
-            and x > 2
-            and x < width - 1
-            and y > top
-            and y < bottom then
-
-            drawLargeStation(
-                x,
-                y,
-                selected,
-                station.interchange,
-                station.terminus
-            )
-        else
-            drawCompactStation(
-                x,
-                y,
-                selected
-            )
-        end
+        local station = STATIONS[id]
+        local x, y = transform(station.x, station.y)
+        drawStation(station, x, y, id == selected)
     end
 
-    -- Draw labels last so coloured tracks cannot overwrite station names.
-    if width >= 34 then
-        for _, id in ipairs(STATION_ORDER) do
-            local station =
-                STATIONS[id]
-
-            local x, y =
-                transform(
-                    station.x,
-                    station.y
-                )
-
-            drawLabel(
-                station,
-                x,
-                y,
-                compactLabels,
-                id == selectedStation
-            )
-        end
+    -- Full station names last so route strokes cannot overwrite them.
+    for _, id in ipairs(STATION_ORDER) do
+        local station = STATIONS[id]
+        local x, y = transform(station.x, station.y)
+        drawLabel(station, x, y, id == selected)
     end
 
-    if footerRows > 0 then
-        local label =
-            module.getStationLabel(
-                selectedStation
-            )
+    if height >= 14 then
+        local station = STATIONS[selected]
+        local name = station and station.name or selected
+        local footer = "You are here: " .. name
+        local fx = math.max(1, math.floor((width - #footer) / 2) + 1)
 
-        local footer =
-            "You are here: "
-            .. tostring(label)
-
-        local x =
-            math.max(
-                1,
-                math.floor(
-                    (width - #footer)
-                    / 2
-                ) + 1
-            )
-
-        writeClipped(
-            x,
-            height,
-            footer,
-            colors.yellow
-        )
+        writeAt(fx, height, footer, YELLOW)
     end
 
-    setBackground(
-        colors.black
-    )
-
-    setText(
-        colors.white
-    )
+    setBackground(BLACK)
+    setText(WHITE)
 
     return true
 end
 
-return module
+return map
