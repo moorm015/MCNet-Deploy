@@ -1,5 +1,5 @@
 -- MCNet detailed passenger network map
--- Version 0.9.6
+-- Version 0.9.7
 -- ComputerCraft 1.75 / CraftOS 1.7 compatible.
 --
 -- IMPORTANT DISPLAY INTENT
@@ -24,7 +24,7 @@ local network = {}
 
 local pixel = dofile("services/ui/pixel.lua")
 
-local VERSION = "0.9.6"
+local VERSION = "0.9.7"
 
 local function colour(name, fallback)
     if colors and colors[name] then
@@ -254,17 +254,21 @@ local ROUTES = {
         }
     },
 
-    -- Honey Line: outside/parallel, misses Atoll Island.
+    -- Honey Line shares the same physical corridor as the Circle Line from
+    -- Bee Gardens to Laboratories. On the public map it is drawn immediately
+    -- alongside the yellow route so passengers can see it uses the same tunnel.
+    --
+    -- It DOES NOT stop at Atoll Island, so there is deliberately no pink
+    -- station marker there. The short fan-out/fan-in at Bee Gardens and
+    -- Laboratories exists only to keep the two colours separately visible.
     {
         line = "HONEY_LINE",
         points = {
-            { x = 265, y = 125 },
-            { x = 245, y = 150 },
-            { x = 140, y = 335 },
-            { x = 140, y = 390 }, -- bypass BELOW/LEFT of Atoll
-            { x = 195, y = 405 },
-            { x = 435, y = 405 },
-            { x = 475, y = 355 }
+            { x = 265, y = 125 }, -- Bee Gardens
+            { x = 255, y = 132 }, -- short visual separation
+            { x = 165, y = 365 }, -- passes beside/below Atoll without stopping
+            { x = 465, y = 365 }, -- parallel to Circle bottom corridor
+            { x = 475, y = 355 }  -- Laboratories
         }
     },
 

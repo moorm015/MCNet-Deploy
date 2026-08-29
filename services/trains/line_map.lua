@@ -1,5 +1,5 @@
 -- MCNet station line-map display
--- Version 0.9.6
+-- Version 0.9.7
 -- ComputerCraft 1.75 / CraftOS 1.7 compatible.
 --
 -- This is the CLEAN local diagram intended for ordinary Tube-style stations.
@@ -19,7 +19,7 @@ local lineMap = {}
 local pixel = dofile("services/ui/pixel.lua")
 local network = dofile("services/trains/network_map.lua")
 
-local VERSION = "0.9.6"
+local VERSION = "0.9.7"
 local ROTATE_SECONDS = 12
 
 local function colour(name, fallback)
@@ -114,32 +114,13 @@ local function labelXForNode(nodeX, label, left, right)
 end
 
 local function drawDirectionHints(lineInfo, routeY, left, right)
-    if lineInfo.circular then
-        pixel.text(
-            left,
-            routeY - 1,
-            "< Anticlockwise",
-            LIGHT_GRAY,
-            BLACK
-        )
-
-        local text = "Clockwise >"
-        pixel.text(
-            right - #text + 1,
-            routeY - 1,
-            text,
-            LIGHT_GRAY,
-            BLACK
-        )
-
-        return
-    end
-
+    -- Public-facing directions use destinations, not North/South/East/West.
+    -- This remains clear even if the railway geography changes later.
     local firstStation = network.getStation(lineInfo.stations[1])
     local lastStation = network.getStation(lineInfo.stations[#lineInfo.stations])
 
     if firstStation then
-        local text = "< " .. firstStation.name
+        local text = "Towards " .. firstStation.name
         pixel.text(
             left,
             routeY - 1,
@@ -150,7 +131,7 @@ local function drawDirectionHints(lineInfo, routeY, left, right)
     end
 
     if lastStation then
-        local text = lastStation.name .. " >"
+        local text = "Towards " .. lastStation.name
         pixel.text(
             right - #text + 1,
             routeY - 1,
@@ -159,6 +140,176 @@ local function drawDirectionHints(lineInfo, routeY, left, right)
             BLACK
         )
     end
+end
+
+local function drawCircleLoop(lineInfo, stationId, servedLines, lineIndex, width, height)
+    -- The Circle Line is a loop, so drawing it as a straight route strip is
+    -- misleading. This dedicated view mirrors the public network topology:
+    --
+    -- Bee Gardens -------- Central Station
+    --      |                      |
+    -- Atoll Island ------- Laboratories
+    --
+    -- Clockwise follows Bee -> Central -> Labs -> Atoll -> Bee.
+    -- Anticlockwise is the reverse.
+    local selectedStation = network.getStation(stationId)
+
+    pixel.text(
+        2,
+        2,
+        lineInfo.name,
+        lineInfo.colour,
+        BLACK
+    )
+
+    if selectedStation then
+        pixel.text(
+            width - #selectedStation.name,
+            2,
+            selectedStation.name,
+            WHITE,
+            BLACK
+        )
+    end
+
+    if #servedLines > 1 then
+        local rotateText =
+            "Line "
+            .. tostring(lineIndex)
+            .. "/"
+            .. tostring(#servedLines)
+            .. " - rotates"
+
+        pixel.text(
+            2,
+            3,
+            rotateText,
+            GRAY,
+            BLACK
+        )
+    else
+        pixel.text(
+            2,
+            3,
+            "Loop service - clockwise / anticlockwise",
+            GRAY,
+            BLACK
+        )
+    end
+
+    local left = math.max(8, math.floor(width * 0.20))
+    local right = math.min(width - 8, math.floor(width * 0.80))
+    local top = math.max(7, math.floor(height * 0.36))
+    local bottom = math.min(height - 5, math.floor(height * 0.68))
+
+    if bottom <= top + 3 then
+        top = 7
+        bottom = math.max(top + 4, height - 5)
+    end
+
+    pixel.hLine(left, right, top, lineInfo.colour)
+    pixel.vLine(right, top, bottom, lineInfo.colour)
+    pixel.hLine(left, right, bottom, lineInfo.colour)
+    pixel.vLine(left, top, bottom, lineInfo.colour)
+
+    local nodes = {
+        BEE_GARDENS = { x = left, y = top, labelY = top - 2 },
+        CENTRAL = { x = right, y = top, labelY = top - 2 },
+        LABORATORIES = { x = right, y = bottom, labelY = bottom + 2 },
+        ATOLL_REEF = { x = left, y = bottom, labelY = bottom + 2 }
+    }
+
+    local order = {
+        "BEE_GARDENS",
+        "CENTRAL",
+        "LABORATORIES",
+        "ATOLL_REEF"
+    }
+
+    for _, routeStationId in ipairs(order) do
+        local node = nodes[routeStationId]
+        local station = network.getStation(routeStationId)
+
+        pixel.station(
+            node.x,
+            node.y,
+            WHITE,
+            routeStationId == stationId and LIME or nil,
+            height >= 16 and 3 or 1
+        )
+
+        if station then
+            local labelX =
+                labelXForNode(
+                    node.x,
+                    station.name,
+                    1,
+                    width
+                )
+
+            pixel.text(
+                labelX,
+                node.labelY,
+                station.name,
+                routeStationId == stationId and LIME or WHITE,
+                BLACK
+            )
+
+            local connectionY =
+                (
+                    routeStationId == "BEE_GARDENS"
+                    or routeStationId == "CENTRAL"
+                )
+                and (node.y + 2)
+                or (node.y - 2)
+
+            drawConnectionSwatches(
+                routeStationId,
+                lineInfo.id,
+                node.x,
+                connectionY
+            )
+        end
+    end
+
+    -- Keep route naming simple and railway-like: a circular service needs
+    -- clockwise/anticlockwise, not invented compass directions.
+    local clockwise = "Clockwise"
+    local anticlockwise = "Anticlockwise"
+
+    pixel.text(
+        math.max(left + 3, math.floor((left + right - #clockwise) / 2)),
+        top + 1,
+        clockwise,
+        LIGHT_GRAY,
+        BLACK
+    )
+
+    pixel.text(
+        math.max(left + 3, math.floor((left + right - #anticlockwise) / 2)),
+        bottom - 1,
+        anticlockwise,
+        LIGHT_GRAY,
+        BLACK
+    )
+
+    if #servedLines > 1 then
+        pixel.centerText(
+            height,
+            "Other lines at this station are shown automatically",
+            LIGHT_GRAY,
+            BLACK
+        )
+    elseif selectedStation then
+        pixel.centerText(
+            height,
+            "You are here: " .. selectedStation.name,
+            YELLOW,
+            BLACK
+        )
+    end
+
+    return true
 end
 
 function lineMap.getVersion()
@@ -204,6 +355,17 @@ function lineMap.draw(options)
         return false, "Unknown rail line"
     end
 
+    if lineInfo.circular then
+        return drawCircleLoop(
+            lineInfo,
+            stationId,
+            servedLines,
+            lineIndex,
+            width,
+            height
+        )
+    end
+
     -- Row 1 is the dashboard title written by display.lua.
     local titleY = 2
     local subY = 3
@@ -239,14 +401,6 @@ function lineMap.draw(options)
             2,
             subY,
             rotateText,
-            GRAY,
-            BLACK
-        )
-    elseif lineInfo.circular then
-        pixel.text(
-            2,
-            subY,
-            "Circle service - both directions",
             GRAY,
             BLACK
         )
