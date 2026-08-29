@@ -1,8 +1,8 @@
 -- MCNet railway network map renderer
--- Version 0.9.4
+-- Version 0.9.5
 -- ComputerCraft 1.75 / CraftOS 1.7 compatible.
 --
--- This is the compact, thin-line renderer for normal station displays.
+-- This is the compact, SOLID-line renderer for normal station displays.
 -- It keeps full station names and follows the approved schematic:
 --
 --   * Yellow Circle Line forms the tilted diamond/parallelogram.
@@ -16,16 +16,13 @@
 --   * Red Electric Line runs ACME -> Central Station.
 --   * Orange Little Mexico route runs Eastern Village -> Little Mexico.
 --
--- Route lines are deliberately drawn as COLOURED FOREGROUND strokes rather
--- than full-cell background blocks. A ComputerCraft monitor cell cannot be
--- subdivided, so this is the only reliable way on classic ComputerCraft to
--- make a route visually thinner than one complete character cell.
---
--- Station markers and the legend still use compact colour/character markers.
+-- Route lines are drawn as SOLID coloured background cells. At monitor text
+-- scale 0.5, one cell is the minimum true solid thickness available in classic
+-- ComputerCraft. Clarity comes from layout, spacing and compact station markers.
 
 local map = {}
 
-local VERSION = "0.9.4"
+local VERSION = "0.9.5"
 local REF_W = 1200
 local REF_H = 520
 
@@ -325,53 +322,44 @@ local function writeAt(x, y, text, colour)
     safeWrite(text)
 end
 
--- Draw one thin coloured route stroke.
+-- Draw one SOLID coloured route segment.
 --
--- Classic ComputerCraft only gives us one background colour per character cell.
--- Using a foreground stroke allows the coloured route to occupy only the glyph
--- itself, which is visibly much thinner than the v0.9.3 filled-cell line.
-local function strokeGlyph(x1, y1, x2, y2)
-    local dx = x2 - x1
-    local dy = y2 - y1
+-- ComputerCraft monitors render background colour per whole character cell.
+-- At text scale 0.5, one cell is the thinnest true solid line available.
+-- The important improvement over v0.9.3 is therefore not "half a cell"
+-- thickness (which classic ComputerCraft cannot do), but cleaner geometry,
+-- smaller markers and more separation between parallel route lanes.
+local function paintCell(x, y, colour)
+    local w, h = term.getSize()
 
-    if math.abs(dy) <= 0 then
-        return "-"
+    x = math.floor(tonumber(x) or 0)
+    y = math.floor(tonumber(y) or 0)
+
+    if x < 1 or x > w or y < 1 or y > h then
+        return
     end
 
-    if math.abs(dx) <= 0 then
-        return "|"
-    end
-
-    if (dx > 0 and dy > 0) or (dx < 0 and dy < 0) then
-        return "\\"
-    end
-
-    return "/"
+    setBackground(colour)
+    setText(colour)
+    term.setCursorPos(x, y)
+    safeWrite(" ")
 end
 
-local function drawThinSegment(x1, y1, x2, y2, colour)
+local function drawSolidSegment(x1, y1, x2, y2, colour)
     x1 = math.floor(x1)
     y1 = math.floor(y1)
     x2 = math.floor(x2)
     y2 = math.floor(y2)
 
-    local glyph = strokeGlyph(x1, y1, x2, y2)
     local dx = math.abs(x2 - x1)
     local dy = math.abs(y2 - y1)
     local sx = x1 < x2 and 1 or -1
     local sy = y1 < y2 and 1 or -1
     local err = dx - dy
     local x, y = x1, y1
-    local w, h = term.getSize()
-
-    setBackground(BLACK)
-    setText(colour)
 
     while true do
-        if x >= 1 and x <= w and y >= 1 and y <= h then
-            term.setCursorPos(x, y)
-            safeWrite(glyph)
-        end
+        paintCell(x, y, colour)
 
         if x == x2 and y == y2 then
             break
@@ -403,25 +391,17 @@ local function drawRoute(route, transform)
         local x1, y1 = transform(a.x, a.y)
         local x2, y2 = transform(b.x, b.y)
 
-        drawThinSegment(x1, y1, x2, y2, info.colour)
+        drawSolidSegment(x1, y1, x2, y2, info.colour)
     end
 end
 
 local function drawStation(station, x, y, selected)
-    local marker = "o"
-
-    if station.interchange or station.terminus then
-        marker = "O"
-    end
-
-    if selected then
-        marker = "@"
-    end
-
-    writeAt(
+    -- Keep stations deliberately compact: one solid cell. Interchanges and
+    -- termini remain visually identifiable from the network topology and
+    -- labels, while the selected station is highlighted lime.
+    paintCell(
         x,
         y,
-        marker,
         selected and LIME or WHITE
     )
 end
@@ -473,8 +453,7 @@ local function drawLegend(row, width)
             rows = rows + 1
         end
 
-        -- A single filled cell makes a clean colour swatch without making
-        -- the route itself chunky.
+        -- A single filled cell makes a clean colour swatch.
         setBackground(info.colour)
         term.setCursorPos(x, y)
         safeWrite(" ")
