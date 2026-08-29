@@ -1,5 +1,5 @@
 -- MCNet multi-monitor display-wall configuration
--- Version 0.9.2
+-- Version 0.9.6
 --
 -- Stores per-monitor dashboard profiles for DISPLAY computers.
 --
@@ -67,6 +67,13 @@ local dashboards = {
         needsPlatform = true
     },
     {
+        id = "trains.line_map",
+        label = "Station line map",
+        category = "Trains",
+        description = "Clean Tube-style line diagram for the selected station. Interchanges rotate through their served lines.",
+        needsStation = true
+    },
+    {
         id = "trains.map",
         label = "Rail network map",
         category = "Trains",
@@ -104,6 +111,7 @@ local categories = {
 
 local aliases = {
     -- v0.9.0 train display IDs.
+    ["trains.line"] = "trains.line_map",
     ["trains.network"] = "trains.map",
     ["trains.stations"] = "trains.departures",
     ["trains.routes"] = "trains.network_status"

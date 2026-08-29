@@ -1,7 +1,7 @@
 -- MCNet configurable multi-monitor display-wall application
 
--- Version 0.9.2
--- Banner word-wrap + thin graphical rail-map revision: 2026-08-29
+-- Version 0.9.6
+-- Banner word-wrap + station line-map + large network-map revision: 2026-08-29
 
 --
 
@@ -101,6 +101,12 @@ function application.run(context)
         context.networkMap
 
         or loadOptional("services/trains/network_map.lua")
+
+    local lineMap =
+
+        context.lineMap
+
+        or loadOptional("services/trains/line_map.lua")
 
     local fallbackBannerMessages = {
 
@@ -3213,6 +3219,61 @@ function application.run(context)
 
     end
 
+    local function drawRailLineMap(
+
+        profile
+
+    )
+
+        clearMonitor(
+
+            "Station Line Map"
+
+        )
+
+        if not lineMap
+            or not lineMap.draw then
+
+            drawFuture(
+
+                "Station Line Map",
+
+                "Line-map renderer is not installed."
+
+            )
+
+            return
+
+        end
+
+        local ok, drawn =
+            pcall(
+
+                lineMap.draw,
+
+                {
+                    selectedStation =
+                        profile.station
+                        or "CENTRAL"
+                }
+
+            )
+
+        if not ok
+            or drawn == false then
+
+            drawFuture(
+
+                "Station Line Map",
+
+                "Unable to render this line map."
+
+            )
+
+        end
+
+    end
+
     local function drawRailMap(
 
         profile
@@ -3239,13 +3300,7 @@ function application.run(context)
                     {
                         selectedStation =
                             profile.station
-                            or "CENTRAL",
-
-                        showLegend = true,
-
-                        lineStyle = "thin",
-
-                        fullNames = true
+                            or "CENTRAL"
                     }
 
                 )
@@ -3821,6 +3876,12 @@ function application.run(context)
             == "trains.platform" then
 
             drawPlatform(profile)
+
+        elseif profile.dashboard
+
+            == "trains.line_map" then
+
+            drawRailLineMap(profile)
 
         elseif profile.dashboard
 
