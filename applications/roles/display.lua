@@ -1,7 +1,7 @@
 -- MCNet configurable multi-monitor display-wall application
 
 -- Version 0.9.2
--- Banner timing + word-wrap revision: 2026-08-28
+-- Banner word-wrap + graphical rail-map revision: 2026-08-29
 
 --
 
@@ -92,6 +92,15 @@ function application.run(context)
         context.railTimetable
 
         or loadOptional("services/trains/timetable.lua")
+
+    -- Optional graphical tube-map renderer. If this file is absent (for
+    -- example during a staged rollout), the older text-line rail map below
+    -- remains available as a safe fallback.
+    local networkMap =
+
+        context.networkMap
+
+        or loadOptional("services/trains/network_map.lua")
 
     local fallbackBannerMessages = {
 
@@ -3209,6 +3218,45 @@ function application.run(context)
         profile
 
     )
+
+        -- Prefer the new ComputerCraft-native graphical map. It draws routes
+        -- as filled colour cells, supports parallel shared corridors and uses
+        -- explicit schematic geometry matching the approved network sketch.
+        if networkMap
+            and networkMap.draw then
+
+            clearMonitor(
+
+                "Rail Network Map"
+
+            )
+
+            local ok, drawn =
+                pcall(
+
+                    networkMap.draw,
+
+                    {
+                        selectedStation =
+                            profile.station
+                            or "CENTRAL",
+
+                        showLegend = true
+                    }
+
+                )
+
+            if ok
+                and drawn ~= false then
+
+                return
+
+            end
+
+            -- If the optional renderer cannot draw on this monitor, retain
+            -- the existing map below rather than taking the whole DISPLAY
+            -- wall down.
+        end
 
         if not railConfig then
 

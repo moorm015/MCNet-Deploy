@@ -1,5 +1,5 @@
 -- MCNet deployment manifest
--- Version 0.9.2
+-- Version 0.9.3
 -- Modular package layout
 --
 -- The installer always installs packages.default, then adds the package set
@@ -11,54 +11,44 @@
 --
 -- Persistent configuration under .mcnet/ is not listed here and is therefore
 -- retained when a computer changes role.
-
 return {
     name = "MCNet",
-    version = "0.9.2",
+    version = "0.9.3",
     protocol = 1,
     entrypoint = "kernel/boot.lua",
-
     packages = {
         default = {
             "CORE",
             "NETWORK"
         },
-
         roles = {
             -- Fresh/unconfigured computers and generic device types.
             DEFAULT = {
                 "CLIENT"
             },
-
             SERVER = {
                 "SERVER"
             },
-
             TOWER = {
                 "CLIENT",
                 "TOWER"
             },
-
             PDA = {
                 "CLIENT",
                 "PDA"
             },
-
             STATION = {
                 "CLIENT",
                 "STATION"
             },
-
             DISPLAY = {
                 "CLIENT",
                 "DISPLAY"
             },
-
             ARCHIVE = {
                 "CLIENT",
                 "ARCHIVE"
             },
-
             -- Development/test computer. TESTS also tags the specialised
             -- modules required by the complete test suite.
             TEST = {
@@ -67,24 +57,20 @@ return {
             }
         }
     },
-
     remove = {
         "mcnet.lua",
         "kernel/console.lua"
     },
-
     files = {
         -- ================================================================
         -- CORE
         -- Boot, shared UI, device/configuration services and console.
         -- ================================================================
-
         {
             source = "startup.lua",
             destination = "startup",
             packages = "CORE"
         },
-
         {
             source = "kernel/boot.lua",
             destination = "kernel/boot.lua",
@@ -95,7 +81,6 @@ return {
             destination = "kernel/app_manager.lua",
             packages = "CORE"
         },
-
         {
             source = "services/ui/theme.lua",
             destination = "services/ui/theme.lua",
@@ -126,7 +111,6 @@ return {
             destination = "services/ui/menu.lua",
             packages = "CORE"
         },
-
         {
             source = "services/system/settings.lua",
             destination = "services/system/settings.lua",
@@ -142,13 +126,11 @@ return {
             destination = "services/system/diagnostics.lua",
             packages = "CORE"
         },
-
         {
             source = "applications/system/console.lua",
             destination = "applications/system/console.lua",
             packages = "CORE"
         },
-
         -- Generic stays tiny and universal. Unknown/future device types can
         -- therefore still open a safe role application without another sync.
         {
@@ -156,12 +138,10 @@ return {
             destination = "applications/roles/generic.lua",
             packages = "CORE"
         },
-
         -- ================================================================
         -- NETWORK
         -- Shared routed-network and messaging runtime used by every role.
         -- ================================================================
-
         {
             source = "services/communications/packet.lua",
             destination = "services/communications/packet.lua",
@@ -202,30 +182,25 @@ return {
             destination = "services/communications/messaging.lua",
             packages = "NETWORK"
         },
-
         {
             source = "drivers/modem.lua",
             destination = "drivers/modem.lua",
             packages = "NETWORK"
         },
-
         -- ================================================================
         -- CLIENT
         -- Core-directory client used by every non-SERVER runtime.
         -- ================================================================
-
         {
             source = "services/communications/core_client.lua",
             destination = "services/communications/core_client.lua",
             packages = "CLIENT"
         },
-
         -- ================================================================
         -- SERVER
         -- Central directory/mailbox server and archive-writing support.
         -- core_server is also installed on TEST computers for its tests.
         -- ================================================================
-
         {
             source = "services/communications/core_server.lua",
             destination = "services/communications/core_server.lua",
@@ -244,11 +219,9 @@ return {
             destination = "applications/roles/server.lua",
             packages = "SERVER"
         },
-
         -- ================================================================
         -- PDA
         -- ================================================================
-
         {
             source = "services/system/idle_manager.lua",
             destination = "services/system/idle_manager.lua",
@@ -259,26 +232,22 @@ return {
             destination = "applications/roles/pda.lua",
             packages = "PDA"
         },
-
         -- ================================================================
         -- TOWER
         -- Routing logic itself is shared NETWORK code; this package is the
         -- tower-specific operator application.
         -- ================================================================
-
         {
             source = "applications/roles/tower.lua",
             destination = "applications/roles/tower.lua",
             packages = "TOWER"
         },
-
         -- ================================================================
         -- DISPLAY
         -- Railway passenger-display data plus display configuration.
         -- Shared rail data is tagged STATION as well where both roles use it.
         -- TESTS is included only on modules required by a packaged test.
         -- ================================================================
-
         {
             source = "services/system/display_config.lua",
             destination = "services/system/display_config.lua",
@@ -294,6 +263,11 @@ return {
                 "DISPLAY",
                 "STATION"
             }
+        },
+        {
+            source = "services/trains/network_map.lua",
+            destination = "services/trains/network_map.lua",
+            packages = "DISPLAY"
         },
         {
             source = "services/trains/banner.lua",
@@ -313,13 +287,11 @@ return {
             destination = "applications/roles/display.lua",
             packages = "DISPLAY"
         },
-
         -- ================================================================
         -- STATION
         -- Local D1/D2/D3/H1 platform safety/control stack.
         -- Rail controller modules are also present on TEST computers.
         -- ================================================================
-
         {
             source = "services/trains/station_config.lua",
             destination = "services/trains/station_config.lua",
@@ -349,25 +321,21 @@ return {
             destination = "applications/roles/station.lua",
             packages = "STATION"
         },
-
         -- ================================================================
         -- ARCHIVE READER
         -- Read-only archive browsing computer. Archive-writing code remains
         -- SERVER-only.
         -- ================================================================
-
         {
             source = "applications/roles/archive_reader.lua",
             destination = "applications/roles/archive_reader.lua",
             packages = "ARCHIVE"
         },
-
         -- ================================================================
         -- TESTS
         -- Not installed on normal devices. Set a development computer's
         -- device type to TEST to install this package.
         -- ================================================================
-
         {
             source = "tests/communications/packet_test.lua",
             destination = "tests/communications/packet_test.lua",
@@ -408,7 +376,6 @@ return {
             destination = "tests/communications/contacts_test.lua",
             packages = "TESTS"
         },
-
         {
             source = "tests/trains/platform_controller_test.lua",
             destination = "tests/trains/platform_controller_test.lua",
@@ -419,7 +386,6 @@ return {
             destination = "tests/trains/station_controller_test.lua",
             packages = "TESTS"
         },
-
         {
             source = "tests/drivers/modem_test.lua",
             destination = "tests/drivers/modem_test.lua",
